@@ -25,6 +25,7 @@ const MIME = {
   '.ogg': 'audio/ogg',
   '.wav': 'audio/wav',
   '.m4a': 'audio/mp4',
+  '.webmanifest': 'application/manifest+json',
 };
 
 // Static media is cacheable (so a CDN like Cloudflare will actually cache it);

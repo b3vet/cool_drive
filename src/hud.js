@@ -25,7 +25,6 @@ export function createHUD() {
   const radioPower = el('radioPower');
 
   let comboPulse = 0;
-  let lastBest = null;
 
   function celebrate(big, sub, color) {
     celebrateBig.textContent = big;
@@ -38,7 +37,7 @@ export function createHUD() {
 
   function update(st, carState, dt) {
     score.textContent = fmt(st.score);
-    best.textContent = 'BEST ' + fmt(st.best);
+    best.textContent = 'BEST ' + fmt(st.bestDrift);
 
     // live combo chip
     if (st.active && st.banked > 0.5) {
@@ -61,16 +60,16 @@ export function createHUD() {
       flash.classList.remove('play');
       void flash.offsetWidth;
       flash.classList.add('play');
-      const newBest = lastBest !== null && st.best > lastBest;
-      if (newBest) {
+      // celebrate ONLY when a single drift breaks your record
+      if (st.justBest > 0) {
         best.classList.remove('flash'); void best.offsetWidth; best.classList.add('flash');
-        celebrate('NEW BEST!', fmt(st.best), '#ffd24a');
+        celebrate('NEW BEST DRIFT!', fmt(st.justBest), '#ffd24a');
+        st.justBest = 0;
       } else if (st.justBankedMult >= 3 || st.justBanked >= 4000) {
         celebrate('DRIFT!', `+${fmt(st.justBanked)}  ×${(st.justBankedMult || 1).toFixed(1)}`, '#33e0a1');
       }
       st.justBanked = 0;
     }
-    lastBest = st.best;
 
     if (st.justFailed) {
       combo.classList.add('fail');

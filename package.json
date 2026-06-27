@@ -1,11 +1,14 @@
 {
   "name": "cool-drive",
   "version": "0.1.0",
-  "description": "A drift-focused 3D car driving game built with three.js, inspired by slowdrive.io",
+  "description": "A drift-focused open-world 3D driving game built with three.js. Tilt to steer on mobile.",
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "build:web": "node scripts/build-www.mjs",
+    "ios": "npm run build:web && npx cap sync ios && npx cap open ios",
+    "ios:sync": "npm run build:web && npx cap sync ios"
   },
   "license": "MIT"
 }

@@ -61,6 +61,8 @@ const audio = createAudio();
 const ach = createAchievements();
 const hud = createHUD();
 const input = createInput();
+const isMobile = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+if (isMobile) document.body.classList.add('mobile');
 const scoring = createScoring();
 const effects = createEffects(ctx.scene);
 
@@ -145,7 +147,9 @@ let acc = 0;
 
 function startGame() {
   if (running) return;
+  if (isMobile && !input.isMotionActive()) input.enableMotion(); // gesture-gated on iOS
   running = true;
+  document.body.classList.add('playing'); // triggers the one-time zone-hint fade
   el('startScreen').classList.add('hidden');
   applyTuning();
   ach.event('car', CARS[selectedCarIndex].id);
@@ -241,8 +245,13 @@ el('radioNext').addEventListener('click', () => { audio.start(); const name = au
 el('radioMute').addEventListener('click', () => { const m = audio.toggleMute(); el('radioMute').textContent = m ? '🔇' : '🔊'; });
 audio.setOnRadioError((name) => { el('radioName').textContent = '⚠ ' + name + ' unavailable'; el('radioPower').classList.remove('on'); });
 
-input.bindTouch({ joy: el('joy'), knob: el('knob'), gas: el('btnGas'), brakeBtn: el('btnBrake'), hb: el('btnHand'), boostBtn: el('btnBoost') });
-if ('ontouchstart' in window) document.body.classList.add('touch');
+// mobile controls: invisible touch zones + boost button + tilt settings + gear
+input.bindZones(el('touchLayer'));
+input.bindHold(el('btnBoostM'), 'boost');
+el('gearBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleSettings(); audio.sfx.ui(); });
+bindSlider('tiltSens', (v) => input.setTiltSensitivity(v), (v) => v.toFixed(1));
+el('tiltInvert').addEventListener('change', (e) => input.setTiltInvert(e.target.checked));
+el('recenterBtn').addEventListener('click', () => { input.recenterTilt(); audio.sfx.ui(); });
 
 window.addEventListener('keydown', startGame, { once: false });
 el('startScreen').addEventListener('click', startGame);
@@ -262,7 +271,6 @@ function drainAchievements() {
 
 // ---- main loop -------------------------------------------------------------
 const MAX_STEPS = 8;
-let lastBestMain = scoring.st.best;
 let wasBoosting = false;
 let distance = 0;
 let topSpeed = 0;
@@ -339,15 +347,15 @@ function frame(now) {
   // capture HUD events before hud consumes them
   const bankedAmt = scoring.st.justBanked;
   const bankedMult = scoring.st.justBankedMult;
+  const isNewBest = scoring.st.justBest > 0;
   hud.update(scoring.st, carState, dt);
 
   // event-driven audio + achievements
   if (bankedAmt > 0) {
     audio.sfx.combo(bankedMult);
     ach.event('drift');
-    if (scoring.st.best > lastBestMain) audio.sfx.best();
+    if (isNewBest) audio.sfx.best();
   }
-  lastBestMain = scoring.st.best;
   if (crashed) { audio.sfx.hit(); ach.event('crash'); }
   for (let i = 0; i < coneHits; i++) ach.event('cone');
   if (coneHits || postHits) audio.sfx.ui();
@@ -364,6 +372,7 @@ function frame(now) {
 window.__game = { carState, scoring, PHYS, input, world, ach, audio, start: startGame, reset: resetCar };
 
 buildStartUI();
+if (isMobile && !window.isSecureContext) { const w = el('secureWarn'); if (w) w.style.display = 'block'; }
 applyTuning();
 hud.renderAchievements(ach.progress());
 el('presetName').textContent = ctx.preset.name;

@@ -2,8 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>CoolDrive — drift</title>
+<link rel="manifest" href="./manifest.webmanifest" />
+<meta name="theme-color" content="#0b1020" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="CoolDrive" />
+<link rel="icon" href="./icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="./icon.svg" />
 <style>
   :root {
     --fg: #f4f7ff;
@@ -59,7 +67,7 @@
   #boostFill { height: 100%; width: 0%; border-radius: 6px; background: linear-gradient(90deg, #4ad6ff, #33e0a1); transition: width .08s linear; }
   #boostFill.ready { background: linear-gradient(90deg, #ffd24a, #ff7a1a); box-shadow: 0 0 14px #ffb23a; }
   #boostFill.active { background: linear-gradient(90deg, #ff7a1a, #ff3b6b); }
-  #presetName { position: fixed; top: 20px; right: 24px; font-size: 12px; font-weight: 700; letter-spacing: .14em; opacity: .6; }
+  #presetName { position: fixed; top: 66px; right: 18px; font-size: 12px; font-weight: 700; letter-spacing: .14em; opacity: .6; }
 
   /* ---------- achievement toasts ---------- */
   #toasts { position: fixed; top: 64px; right: 18px; z-index: 9; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
@@ -78,10 +86,10 @@
   #radioPower.on { background: var(--accent); color: #06231a; }
   #radioName { min-width: 92px; font-weight: 700; opacity: .9; }
   #radioName .eq { color: var(--accent); }
-  body.touch #radio { left: 50%; transform: translateX(-50%); bottom: 14px; }
+  body.mobile #radio { left: 14px; bottom: 12px; transform: none; padding: 5px 8px; }
 
   #hint { position: fixed; bottom: 56px; left: 50%; transform: translateX(-50%); font-size: 12px; opacity: .42; font-weight: 600; text-align: center; pointer-events: none; }
-  body.touch #hint { display: none; }
+  body.mobile #hint { display: none; }
 
   /* ---------- start screen ---------- */
   #startScreen { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: radial-gradient(120% 120% at 50% 20%, rgba(11,16,32,.25), rgba(11,16,32,.86)); backdrop-filter: blur(3px); transition: opacity .5s ease; overflow-y: auto; }
@@ -123,8 +131,10 @@
   .row label { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 7px; }
   .row label span { opacity: .7; font-variant-numeric: tabular-nums; }
   input[type=range] { width: 100%; accent-color: var(--accent); }
-  #presetBtn { width: 100%; margin-top: 4px; padding: 10px; border-radius: 10px; cursor: pointer; border: 1px solid rgba(255,255,255,.16); background: var(--panel-soft); color: var(--fg); font-weight: 700; font-family: inherit; font-size: 13px; }
-  #presetBtn:hover { background: rgba(255,255,255,.1); }
+  #presetBtn, #recenterBtn { width: 100%; margin-top: 4px; padding: 10px; border-radius: 10px; cursor: pointer; border: 1px solid rgba(255,255,255,.16); background: var(--panel-soft); color: var(--fg); font-weight: 700; font-family: inherit; font-size: 13px; }
+  #presetBtn:hover, #recenterBtn:hover { background: rgba(255,255,255,.1); }
+  .tiltToggle { display: flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .tiltToggle input { width: 18px; height: 18px; accent-color: var(--accent); }
   .achsec { margin-top: 22px; border-top: 1px solid rgba(255,255,255,.1); padding-top: 16px; }
   .achsec h3 { margin: 0 0 10px; font-size: 13px; letter-spacing: .1em; opacity: .8; }
   #achList { display: flex; flex-direction: column; gap: 7px; }
@@ -136,25 +146,39 @@
   .ach .ad { opacity: .65; font-size: 11px; }
   #settings .esc { margin-top: 18px; font-size: 11px; opacity: .5; }
 
-  /* ---------- touch controls ---------- */
-  .touchUI { display: none; }
-  body.touch .touchUI { display: block; }
-  #joy { position: fixed; left: 26px; bottom: 70px; width: 124px; height: 124px; border-radius: 50%; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); z-index: 6; pointer-events: auto; touch-action: none; }
-  #knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: rgba(255,255,255,.28); border: 1px solid rgba(255,255,255,.4); }
-  .tbtn { position: fixed; width: 74px; height: 74px; border-radius: 50%; z-index: 6; pointer-events: auto; display: grid; place-items: center; font-weight: 800; font-size: 12px; color: #fff; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); touch-action: none; }
-  #btnGas   { right: 26px; bottom: 120px; background: rgba(51,224,161,.22); border-color: rgba(51,224,161,.5); }
-  #btnBrake { right: 118px; bottom: 50px; background: rgba(255,90,77,.18); border-color: rgba(255,90,77,.45); }
-  #btnHand  { right: 26px; bottom: 36px; background: rgba(74,214,255,.18); border-color: rgba(74,214,255,.45); }
-  #btnBoost { right: 118px; bottom: 138px; background: rgba(255,178,58,.2); border-color: rgba(255,178,58,.5); }
-  .tbtn.active { filter: brightness(1.5); box-shadow: inset 0 0 16px rgba(0,0,0,.35); transform: scale(0.93); }
+  /* ---------- mobile controls (invisible touch zones + tilt steering) ------- */
+  #touchLayer { position: fixed; inset: 0; z-index: 4; display: none; touch-action: none; }
+  body.mobile #touchLayer { display: block; }
+  .zoneHint { position: absolute; font-weight: 800; letter-spacing: .2em; font-size: 12px; opacity: 0; color: rgba(255,255,255,.55); pointer-events: none; white-space: nowrap; }
+  body.mobile.playing .zoneHint { animation: zoneFade 6s ease forwards; }
+  @keyframes zoneFade { 0%, 55% { opacity: .5 } 100% { opacity: 0 } }
+  .zh-brake { left: 6%; top: 50%; transform: translateY(-50%); }
+  .zh-gas { right: 6%; top: 50%; transform: translateY(-50%); }
+  .zh-hand { left: 50%; bottom: 6%; transform: translateX(-50%); }
+
+  #gearBtn { position: fixed; top: 16px; right: 16px; z-index: 8; width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgba(255,255,255,.16); background: var(--panel-soft); color: var(--fg); font-size: 21px; cursor: pointer; display: grid; place-items: center; backdrop-filter: blur(6px); pointer-events: auto; }
+  #gearBtn:hover { background: rgba(255,255,255,.12); }
+
+  #btnBoostM { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 8; display: none; align-items: center; gap: 6px; padding: 9px 18px; border-radius: 999px; background: rgba(255,178,58,.22); border: 1px solid rgba(255,178,58,.5); color: #fff; font-weight: 800; font-size: 14px; pointer-events: auto; touch-action: none; }
+  body.mobile #btnBoostM { display: inline-flex; }
+  #btnBoostM.active { filter: brightness(1.4); transform: translateX(-50%) scale(.94); }
+  #btnBoostM span { font-size: 11px; opacity: .85; }
+
+  #rotateHint { position: fixed; inset: 0; z-index: 40; display: none; place-items: center; text-align: center; background: rgba(8,10,18,.96); color: var(--fg); font-weight: 700; font-size: 19px; line-height: 1.7; }
+  #rotateHint .rot { font-size: 46px; display: block; margin-bottom: 12px; }
+  @media (orientation: portrait) { body.mobile #rotateHint { display: grid; } }
+
+  .mobileOnly { display: none; }
+  body.mobile .mobileOnly { display: block; }
+  body.mobile #hint { display: none; }
 </style>
 
-<script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+<script async src="./vendor/es-module-shims.js"></script>
 <script type="importmap">
 {
   "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    "three": "./vendor/three/build/three.module.min.js",
+    "three/addons/": "./vendor/three/examples/jsm/"
   }
 }
 </script>
@@ -184,14 +208,19 @@
 
 <div id="hint"><kbd>WASD</kbd> drive · <kbd>Space</kbd> handbrake · <kbd>Shift</kbd> boost · <kbd>C</kbd> cam · <kbd>R</kbd> reset · <kbd>M</kbd> mute · <kbd>Esc</kbd> settings</div>
 
-<!-- touch controls -->
-<div class="touchUI">
-  <div id="joy"><div id="knob"></div></div>
-  <div id="btnGas" class="tbtn">GAS</div>
-  <div id="btnBrake" class="tbtn">BRAKE</div>
-  <div id="btnHand" class="tbtn">DRIFT</div>
-  <div id="btnBoost" class="tbtn">BOOST</div>
+<!-- mobile: invisible touch zones (steering is gyro) -->
+<div id="touchLayer">
+  <div class="zoneHint zh-brake">◀ BRAKE</div>
+  <div class="zoneHint zh-gas">GAS ▶</div>
+  <div class="zoneHint zh-hand">▼ HANDBRAKE ▼</div>
 </div>
+<div id="btnBoostM">⚡<span>BOOST</span></div>
+
+<!-- settings gear (tap to open) -->
+<button id="gearBtn" title="Settings">⚙</button>
+
+<!-- portrait warning (mobile only) -->
+<div id="rotateHint"><div><span class="rot">⟳</span>Rotate your device<br/>to landscape to drive</div></div>
 
 <!-- settings -->
 <div id="settings">
@@ -207,6 +236,9 @@
       <option value="high">High</option><option value="medium">Medium</option><option value="low">Low (cool &amp; quiet)</option>
     </select>
   </div>
+  <div class="row mobileOnly"><label>Tilt sensitivity <span id="tiltSensVal">1.0</span></label><input id="tiltSens" type="range" min="0.4" max="2.5" step="0.1" value="1.0" /></div>
+  <div class="row mobileOnly"><label class="tiltToggle"><input id="tiltInvert" type="checkbox" /> Invert tilt direction</label></div>
+  <div class="row mobileOnly"><button id="recenterBtn">Recenter tilt (level = straight)</button></div>
   <div class="row"><button id="presetBtn">Change Time of Day</button></div>
   <div class="achsec"><h3>ACHIEVEMENTS <span id="achCount" style="opacity:.6;font-weight:600"></span></h3><div id="achList"></div></div>
   <div class="esc">Press <kbd>Esc</kbd> to close</div>
@@ -225,10 +257,17 @@
     <div class="cars" id="carRow"></div>
 
     <button id="btnStart">DRIVE</button>
-    <div class="startfoot"><b id="achProgress">0/0</b> achievements · sound starts on drive (<kbd>M</kbd> to mute)</div>
+    <div class="startfoot"><b id="achProgress">0/0</b> achievements · sound starts on drive</div>
+    <div class="startfoot mobileOnly" style="margin-top:6px">📱 <b>Tilt</b> to steer · hold <b>right</b> = gas · <b>left</b> = brake · <b>bottom</b> = handbrake</div>
+    <div class="startfoot" id="secureWarn" style="display:none;color:#ffb23a;margin-top:6px">⚠ Tilt steering needs HTTPS (iOS blocks motion on http://). It works in the App Store build, or test over an HTTPS tunnel — see MOBILE.md.</div>
   </div>
 </div>
 
 <script type="module" src="./src/main.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  }
+</script>
 </body>
 </html>

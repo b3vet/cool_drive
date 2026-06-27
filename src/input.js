@@ -1,25 +1,23 @@
 // ============================================================================
-// input.js — keyboard + touch input, sampled into a single struct each frame.
+// input.js — unified input, sampled into one struct per frame.
+//   • Desktop: keyboard (WASD/arrows, space, shift).
+//   • Mobile:  gyroscope steering (tilt) + invisible touch zones
+//              (left half = brake, right half = gas, bottom strip = handbrake)
+//              + held buttons (boost) and tap buttons (settings).
 // ============================================================================
+
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 export function createInput() {
   const keys = new Set();
-  const input = {
-    throttle: false,
-    brake: false,
-    steer: 0, // -1..1 (analog target; smoothing happens in physics)
-    handbrake: false,
-    boost: false,
-  };
-
-  // edge-triggered actions the game polls + clears
   const pressed = new Set();
+  const input = { throttle: false, brake: false, steer: 0, handbrake: false, boost: false };
 
+  // ---- keyboard -------------------------------------------------------------
   const down = (e) => {
     const k = e.key.toLowerCase();
     if (!keys.has(k)) pressed.add(k);
     keys.add(k);
-    // prevent page scroll on arrows/space
     if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
   };
   const up = (e) => keys.delete(e.key.toLowerCase());
@@ -27,79 +25,103 @@ export function createInput() {
   window.addEventListener('keyup', up);
   window.addEventListener('blur', () => keys.clear());
 
-  // ---- touch joystick + buttons --------------------------------------------
-  const touch = { steer: 0, throttle: false, brake: false, handbrake: false, boost: false };
+  // ---- mobile touch state ---------------------------------------------------
+  const touch = { throttle: false, brake: false, handbrake: false, boost: false };
+  const touchZones = new Map(); // touch identifier -> zone string
 
-  function bindTouch(els) {
-    if (!els) return;
-    const { joy, knob, gas, brakeBtn, hb, boostBtn } = els;
-    if (joy && knob) {
-      let active = false;
-      let id = null;
-      let cx = 0,
-        cy = 0;
-      const R = 55;
-      const start = (e) => {
-        active = true;
-        const t = e.changedTouches ? e.changedTouches[0] : e;
-        id = t.identifier;
-        const r = joy.getBoundingClientRect();
-        cx = r.left + r.width / 2;
-        cy = r.top + r.height / 2;
-        move(e);
-      };
-      const move = (e) => {
-        if (!active) return;
-        let t = e;
-        if (e.changedTouches) {
-          t = [...e.changedTouches].find((x) => x.identifier === id) || e.changedTouches[0];
-        }
-        const dx = t.clientX - cx;
-        const dy = t.clientY - cy;
-        const d = Math.min(Math.hypot(dx, dy), R);
-        const a = Math.atan2(dy, dx);
-        const kx = Math.cos(a) * d;
-        const ky = Math.sin(a) * d;
-        knob.style.transform = `translate(${kx}px, ${ky}px)`;
-        touch.steer = Math.max(-1, Math.min(1, dx / R));
-        touch.throttle = dy < -R * 0.25;
-        touch.brake = dy > R * 0.45;
-      };
-      const end = () => {
-        active = false;
-        knob.style.transform = 'translate(0,0)';
-        touch.steer = 0;
-        touch.throttle = false;
-        touch.brake = false;
-      };
-      joy.addEventListener('touchstart', start, { passive: false });
-      window.addEventListener('touchmove', move, { passive: false });
-      window.addEventListener('touchend', end);
-      window.addEventListener('touchcancel', end);
-    }
-    const hold = (el, prop) => {
-      if (!el) return;
-      const on = (e) => {
-        e.preventDefault();
-        touch[prop] = true;
-        el.classList.add('active');
-      };
-      const off = () => {
-        touch[prop] = false;
-        el.classList.remove('active');
-      };
-      el.addEventListener('touchstart', on, { passive: false });
-      el.addEventListener('touchend', off);
-      el.addEventListener('touchcancel', off);
-      el.addEventListener('mousedown', on);
-      window.addEventListener('mouseup', off);
-    };
-    hold(gas, 'throttle');
-    hold(brakeBtn, 'brake');
-    hold(hb, 'handbrake');
-    hold(boostBtn, 'boost');
+  // ---- gyroscope ------------------------------------------------------------
+  let motionActive = false;
+  let useTilt = false;
+  let tiltRaw = 0;
+  let tiltNeutral = null;
+  let tiltSens = 1.0; // 1 = ~26° for full lock
+  let tiltInvert = false;
+
+  function onOrient(e) {
+    if (e.beta === null && e.gamma === null) return;
+    const angle = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+    // pick the axis that maps to left/right "wheel" tilt for the current orientation
+    let t;
+    if (angle === 90) t = e.beta;
+    else if (angle === 270 || angle === -90) t = -e.beta;
+    else if (angle === 180) t = -e.gamma;
+    else t = e.gamma; // 0 / portrait
+    tiltRaw = t;
+    if (tiltNeutral === null) tiltNeutral = t; // calibrate to however it's first held
   }
 
+  async function enableMotion() {
+    try {
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        const res = await DeviceOrientationEvent.requestPermission(); // iOS 13+ gesture-gated
+        if (res !== 'granted') return false;
+      }
+      window.addEventListener('deviceorientation', onOrient);
+      motionActive = true;
+      useTilt = true;
+      tiltNeutral = null;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  const recenterTilt = () => { tiltNeutral = tiltRaw; };
+  const setTiltSensitivity = (v) => { tiltSens = v; };
+  const setTiltInvert = (b) => { tiltInvert = b; };
+  const isMotionActive = () => motionActive;
+
+  // ---- touch zones (multi-touch) -------------------------------------------
+  function zoneOf(x, y) {
+    const W = window.innerWidth, H = window.innerHeight;
+    if (y > H * 0.8) return 'handbrake'; // bottom strip
+    return x < W * 0.5 ? 'brake' : 'gas'; // left = brake, right = gas
+  }
+  function recomputeZones() {
+    let g = false, b = false, h = false;
+    for (const z of touchZones.values()) {
+      if (z === 'gas') g = true;
+      else if (z === 'brake') b = true;
+      else if (z === 'handbrake') h = true;
+    }
+    touch.throttle = g;
+    touch.brake = b;
+    touch.handbrake = h;
+  }
+  function bindZones(layer) {
+    if (!layer) return;
+    const start = (e) => {
+      for (const t of e.changedTouches) touchZones.set(t.identifier, zoneOf(t.clientX, t.clientY));
+      recomputeZones();
+      e.preventDefault();
+    };
+    const move = (e) => {
+      for (const t of e.changedTouches) if (touchZones.has(t.identifier)) touchZones.set(t.identifier, zoneOf(t.clientX, t.clientY));
+      recomputeZones();
+      e.preventDefault();
+    };
+    const end = (e) => {
+      for (const t of e.changedTouches) touchZones.delete(t.identifier);
+      recomputeZones();
+    };
+    layer.addEventListener('touchstart', start, { passive: false });
+    layer.addEventListener('touchmove', move, { passive: false });
+    layer.addEventListener('touchend', end);
+    layer.addEventListener('touchcancel', end);
+  }
+
+  // held button (boost on mobile); also works with mouse for testing
+  function bindHold(el, prop) {
+    if (!el) return;
+    const on = (e) => { e.preventDefault(); touch[prop] = true; el.classList.add('active'); };
+    const off = () => { touch[prop] = false; el.classList.remove('active'); };
+    el.addEventListener('touchstart', on, { passive: false });
+    el.addEventListener('touchend', off);
+    el.addEventListener('touchcancel', off);
+    el.addEventListener('mousedown', on);
+    window.addEventListener('mouseup', off);
+  }
+
+  // ---- sample ---------------------------------------------------------------
   function sample() {
     const kThrottle = keys.has('w') || keys.has('arrowup');
     const kBrake = keys.has('s') || keys.has('arrowdown');
@@ -112,22 +134,31 @@ export function createInput() {
     input.brake = kBrake || touch.brake;
     input.handbrake = kHand || touch.handbrake;
     input.boost = kBoost || touch.boost;
-    let steer = (kLeft ? 1 : 0) - (kRight ? 1 : 0); // left = +1 (heading increases)
-    if (steer === 0 && touch.steer !== 0) steer = -touch.steer; // joystick: right = +x
+
+    // steering: tilt takes over on mobile when motion is active; else keyboard
+    let steer = (kLeft ? 1 : 0) - (kRight ? 1 : 0);
+    if (useTilt && motionActive && tiltNeutral !== null) {
+      let d = tiltRaw - tiltNeutral;
+      if (tiltInvert) d = -d;
+      const range = 26 / clamp(tiltSens, 0.3, 3);
+      let s = clamp(d / range, -1, 1);
+      if (Math.abs(s) < 0.05) s = 0; // deadzone
+      steer = s;
+    }
     input.steer = steer;
     return input;
   }
 
   function consumePressed(key) {
-    if (pressed.has(key)) {
-      pressed.delete(key);
-      return true;
-    }
+    if (pressed.has(key)) { pressed.delete(key); return true; }
     return false;
   }
-  function clearPressed() {
-    pressed.clear();
-  }
+  function clearPressed() { pressed.clear(); }
 
-  return { sample, consumePressed, clearPressed, bindTouch, _keys: keys };
+  return {
+    sample, consumePressed, clearPressed,
+    bindZones, bindHold,
+    enableMotion, recenterTilt, setTiltSensitivity, setTiltInvert, isMotionActive,
+    _keys: keys,
+  };
 }

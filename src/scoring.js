@@ -7,7 +7,7 @@
 
 import { SCORE, PHYS } from './config.js';
 
-const KEY = 'cooldrive.best';
+const KEY = 'cooldrive.bestdrift';
 
 export function createScoring() {
   const st = {
@@ -17,10 +17,11 @@ export function createScoring() {
     driftTime: 0, // continuous seconds of valid drifting
     grace: 0,
     active: false,
-    best: Number(localStorage.getItem(KEY) || 0),
+    bestDrift: Number(localStorage.getItem(KEY) || 0), // best SINGLE drift ever (persisted)
     // events for the HUD (consume + clear each frame)
     justBanked: 0,
     justBankedMult: 1,
+    justBest: 0, // >0 when the drift just banked set a new single-drift record
     justFailed: false,
     totalTime: 0,
     longestDrift: 0,
@@ -29,12 +30,14 @@ export function createScoring() {
 
   function bank() {
     if (st.banked > 0) {
-      st.score += st.banked;
+      st.score += st.banked; // cumulative session total
       st.justBanked = st.banked;
       st.justBankedMult = st.multiplier;
-      if (st.score > st.best) {
-        st.best = st.score;
-        localStorage.setItem(KEY, String(Math.floor(st.best)));
+      // "best" = the biggest SINGLE drift you've ever banked (not the cumulative total)
+      if (st.banked > st.bestDrift) {
+        st.bestDrift = st.banked;
+        st.justBest = st.banked;
+        localStorage.setItem(KEY, String(Math.floor(st.bestDrift)));
       }
     }
     st.banked = 0;

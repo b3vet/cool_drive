@@ -1,0 +1,9 @@
+{
+  "appId": "io.cooldrive.app",
+  "appName": "CoolDrive",
+  "webDir": "www",
+  "backgroundColor": "#0b1020",
+  "ios": {
+    "contentInset": "never"
+  }
+}

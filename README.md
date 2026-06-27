@@ -104,7 +104,7 @@ src/
   input.js        keyboard + touch joystick, sampled into one struct/frame
   camera.js       spring chase cam, drift framing, FOV punch, 4 view modes
   effects.js      skid-mark ribbons (ring buffer) + smoke (custom Points shader)
-  scoring.js      combo multiplier, grace window, banking, localStorage best
+  scoring.js      combo multiplier, grace window, banking; SCORE = session total, BEST = best single drift (localStorage)
   audio.js        Web Audio SFX (synth, no files) + generative radio + URL stations
   achievements.js localStorage-persisted achievements with a stats/event API
   hud.js          DOM overlay, combo/best celebrations, achievement toasts, radio label
