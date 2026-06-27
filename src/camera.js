@@ -73,7 +73,7 @@ export function createChaseCam(camera, car) {
     smoothedLook.lerp(lookWorld, MODES[mode] === 'overhead' ? Math.min(dt * 6, 1) : lookT);
     camera.lookAt(smoothedLook);
     // counter-roll the view by the phone's tilt so the world stays level on screen
-    rollSmoothed += (rollTarget - rollSmoothed) * Math.min(dt * 8, 1);
+    rollSmoothed += (rollTarget - rollSmoothed) * Math.min(dt * 14, 1);
     if (Math.abs(rollSmoothed) > 1e-4) camera.rotateZ(rollSmoothed);
 
     // FOV punch with speed + boost

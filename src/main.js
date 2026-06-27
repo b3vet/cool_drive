@@ -250,6 +250,7 @@ input.bindZones(el('touchLayer'));
 input.bindHold(el('btnBoostM'), 'boost');
 el('gearBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleSettings(); audio.sfx.ui(); });
 el('settingsClose').addEventListener('click', () => { settingsEl.classList.remove('open'); audio.sfx.ui(); });
+el('camBtn').addEventListener('click', (e) => { e.stopPropagation(); if (cam) cam.cycle(); audio.sfx.ui(); });
 bindSlider('tiltSens', (v) => input.setTiltSensitivity(v), (v) => v.toFixed(1));
 el('tiltInvert').addEventListener('change', (e) => input.setTiltInvert(e.target.checked));
 el('recenterBtn').addEventListener('click', () => { input.recenterTilt(); audio.sfx.ui(); });
@@ -334,7 +335,7 @@ function frame(now) {
 
   applyCarVisual(car, render, carState, cmd, dt);
   trackSun();
-  if (cam) cam.update(carState, dt, isMobile && input.isMotionActive() ? input.deviceRoll() * 0.9 : 0);
+  if (cam) cam.update(carState, dt, isMobile && input.isMotionActive() ? input.deviceRoll() * 1.15 : 0);
   effects.update(render, car.rearOffsets, carState, dt);
   updateCones(world, dt);
   updatePosts(world, dt);
