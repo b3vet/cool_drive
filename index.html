@@ -23,11 +23,17 @@
   }
   * { box-sizing: border-box; }
   html, body {
-    margin: 0; height: 100%; overflow: hidden; background: #0b1020;
+    margin: 0; height: 100vh; height: 100dvh; overflow: hidden; background: #0b1020;
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     color: var(--fg); -webkit-user-select: none; user-select: none; touch-action: none;
+    position: fixed; inset: 0; overscroll-behavior: none;
   }
-  #app { position: fixed; inset: 0; }
+  #app { position: fixed; inset: 0; height: 100vh; height: 100dvh; }
+  /* keep edge controls clear of the notch / home indicator */
+  #scoreWrap { padding-left: env(safe-area-inset-left); padding-top: env(safe-area-inset-top); }
+  #speedWrap { margin-right: env(safe-area-inset-right); margin-bottom: env(safe-area-inset-bottom); }
+  #gearBtn { margin-right: env(safe-area-inset-right); margin-top: env(safe-area-inset-top); }
+  #radio { margin-left: env(safe-area-inset-left); }
   canvas { display: block; }
   kbd { background: rgba(255,255,255,.14); border-radius: 5px; padding: 1px 6px; font-weight: 700; font-family: inherit; font-size: 11px; }
 
@@ -125,6 +131,8 @@
   /* ---------- settings panel ---------- */
   #settings { position: fixed; top: 0; right: 0; height: 100%; width: 320px; z-index: 30; background: var(--panel); backdrop-filter: blur(12px); box-shadow: var(--shadow); transform: translateX(100%); transition: transform .28s cubic-bezier(.4,0,.2,1); padding: 24px; pointer-events: auto; border-left: 1px solid rgba(255,255,255,.08); overflow-y: auto; }
   #settings.open { transform: translateX(0); }
+  #settingsClose { position: absolute; top: 14px; right: 14px; width: 36px; height: 36px; border-radius: 50%; border: 1px solid rgba(255,255,255,.16); background: var(--panel-soft); color: var(--fg); font-size: 16px; cursor: pointer; display: grid; place-items: center; }
+  #settingsClose:hover { background: rgba(255,255,255,.12); }
   #settings h2 { margin: 0 0 4px; font-size: 18px; }
   #settings .sub { font-size: 12px; opacity: .55; margin-bottom: 18px; }
   .row { margin-bottom: 16px; }
@@ -224,6 +232,7 @@
 
 <!-- settings -->
 <div id="settings">
+  <button id="settingsClose" aria-label="Close settings">✕</button>
   <h2>Settings</h2>
   <div class="sub">Fine-tune the feel (your mode sets the baseline).</div>
   <div class="row"><label>Drift Assist <span id="assistVal">1.0</span></label><input id="assist" type="range" min="0" max="4" step="0.1" value="1.0" /></div>
@@ -237,7 +246,7 @@
     </select>
   </div>
   <div class="row mobileOnly"><label>Tilt sensitivity <span id="tiltSensVal">1.0</span></label><input id="tiltSens" type="range" min="0.4" max="2.5" step="0.1" value="1.0" /></div>
-  <div class="row mobileOnly"><label class="tiltToggle"><input id="tiltInvert" type="checkbox" /> Invert tilt direction</label></div>
+  <div class="row mobileOnly"><label class="tiltToggle"><input id="tiltInvert" type="checkbox" checked /> Invert tilt direction</label></div>
   <div class="row mobileOnly"><button id="recenterBtn">Recenter tilt (level = straight)</button></div>
   <div class="row"><button id="presetBtn">Change Time of Day</button></div>
   <div class="achsec"><h3>ACHIEVEMENTS <span id="achCount" style="opacity:.6;font-weight:600"></span></h3><div id="achList"></div></div>
@@ -260,6 +269,7 @@
     <div class="startfoot"><b id="achProgress">0/0</b> achievements · sound starts on drive</div>
     <div class="startfoot mobileOnly" style="margin-top:6px">📱 <b>Tilt</b> to steer · hold <b>right</b> = gas · <b>left</b> = brake · <b>bottom</b> = handbrake</div>
     <div class="startfoot" id="secureWarn" style="display:none;color:#ffb23a;margin-top:6px">⚠ Tilt steering needs HTTPS (iOS blocks motion on http://). It works in the App Store build, or test over an HTTPS tunnel — see MOBILE.md.</div>
+    <div class="startfoot" id="a2hsHint" style="display:none;margin-top:8px">📲 For <b>true fullscreen</b> (no Safari bars): tap <b>Share</b> → <b>Add to Home Screen</b>, then open CoolDrive from your home screen.</div>
   </div>
 </div>
 

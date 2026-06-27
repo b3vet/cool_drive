@@ -22,7 +22,7 @@ export const PHYS = {
   // speed, but grip-limited (maxLatAccel) at speed so the radius widens like a real car.
   maxSteer: 0.58, // max wheel angle (rad) ~33 deg (tight low-speed lock)
   steerSpeedFalloff: 0.28, // mild — most speed-widening comes from the grip cap now
-  steerInputRate: 6.0, // how fast steer ramps toward target (1/s)
+  steerInputRate: 9.0, // how fast steer ramps toward target (1/s) — snappy, tracks tilt
   steerReturnRate: 9.0, // how fast wheel auto-centers with no input (rad/s)
   maxLatAccel: 17, // max lateral accel while gripped (m/s^2, ~1.7g) -> speed-based radius
 

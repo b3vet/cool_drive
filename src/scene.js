@@ -163,7 +163,11 @@ export function applyPreset(ctx, renderer, key) {
 }
 
 export function onResize(ctx, renderer) {
-  ctx.camera.aspect = window.innerWidth / window.innerHeight;
+  // prefer the VISIBLE viewport so nothing hides under iOS Safari's toolbars
+  const vv = window.visualViewport;
+  const w = (vv && vv.width) || window.innerWidth;
+  const h = (vv && vv.height) || window.innerHeight;
+  ctx.camera.aspect = w / h;
   ctx.camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setSize(w, h);
 }

@@ -249,6 +249,7 @@ audio.setOnRadioError((name) => { el('radioName').textContent = '⚠ ' + name + 
 input.bindZones(el('touchLayer'));
 input.bindHold(el('btnBoostM'), 'boost');
 el('gearBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleSettings(); audio.sfx.ui(); });
+el('settingsClose').addEventListener('click', () => { settingsEl.classList.remove('open'); audio.sfx.ui(); });
 bindSlider('tiltSens', (v) => input.setTiltSensitivity(v), (v) => v.toFixed(1));
 el('tiltInvert').addEventListener('change', (e) => input.setTiltInvert(e.target.checked));
 el('recenterBtn').addEventListener('click', () => { input.recenterTilt(); audio.sfx.ui(); });
@@ -257,6 +258,8 @@ window.addEventListener('keydown', startGame, { once: false });
 el('startScreen').addEventListener('click', startGame);
 el('btnStart').addEventListener('click', (e) => { e.stopPropagation(); startGame(); });
 window.addEventListener('resize', () => onResize(ctx, renderer));
+window.addEventListener('orientationchange', () => setTimeout(() => onResize(ctx, renderer), 250));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', () => onResize(ctx, renderer));
 
 // ---- achievements drain ----------------------------------------------------
 function drainAchievements() {
@@ -331,7 +334,7 @@ function frame(now) {
 
   applyCarVisual(car, render, carState, cmd, dt);
   trackSun();
-  if (cam) cam.update(carState, dt);
+  if (cam) cam.update(carState, dt, isMobile && input.isMotionActive() ? input.deviceRoll() * 0.9 : 0);
   effects.update(render, car.rearOffsets, carState, dt);
   updateCones(world, dt);
   updatePosts(world, dt);
@@ -373,6 +376,11 @@ window.__game = { carState, scoring, PHYS, input, world, ach, audio, start: star
 
 buildStartUI();
 if (isMobile && !window.isSecureContext) { const w = el('secureWarn'); if (w) w.style.display = 'block'; }
+// iOS Safari can't fully hide its chrome in a tab — prompt Add to Home Screen for fullscreen
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+const standalone = window.navigator.standalone === true ||
+  (window.matchMedia && (window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches));
+if (isMobile && isIOS && !standalone) { const w = el('a2hsHint'); if (w) w.style.display = 'block'; }
 applyTuning();
 hud.renderAchievements(ach.progress());
 el('presetName').textContent = ctx.preset.name;

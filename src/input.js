@@ -34,8 +34,8 @@ export function createInput() {
   let useTilt = false;
   let tiltRaw = 0;
   let tiltNeutral = null;
-  let tiltSens = 1.0; // 1 = ~26° for full lock
-  let tiltInvert = false;
+  let tiltSens = 1.0; // 1 = ~32° tilt for full lock
+  let tiltInvert = true; // inverted feels right by default
 
   function onOrient(e) {
     if (e.beta === null && e.gamma === null) return;
@@ -69,6 +69,11 @@ export function createInput() {
   const setTiltSensitivity = (v) => { tiltSens = v; };
   const setTiltInvert = (b) => { tiltInvert = b; };
   const isMotionActive = () => motionActive;
+  // raw screen-roll (radians) for the camera to counter so the view stays level
+  const deviceRoll = () => {
+    if (!motionActive || tiltNeutral === null) return 0;
+    return clamp(tiltRaw - tiltNeutral, -40, 40) * (Math.PI / 180);
+  };
 
   // ---- touch zones (multi-touch) -------------------------------------------
   function zoneOf(x, y) {
@@ -140,10 +145,12 @@ export function createInput() {
     if (useTilt && motionActive && tiltNeutral !== null) {
       let d = tiltRaw - tiltNeutral;
       if (tiltInvert) d = -d;
-      const range = 26 / clamp(tiltSens, 0.3, 3);
-      let s = clamp(d / range, -1, 1);
-      if (Math.abs(s) < 0.05) s = 0; // deadzone
-      steer = s;
+      // progressive analog mapping (like a real wheel): proportional to tilt angle,
+      // with a soft deadzone so center is calm but there's no on/off jump.
+      const dead = 1.5; // degrees
+      const range = 32 / clamp(tiltSens, 0.3, 3); // degrees for full lock
+      const m = clamp((Math.abs(d) - dead) / (range - dead), 0, 1);
+      steer = Math.sign(d) * m;
     }
     input.steer = steer;
     return input;
@@ -158,7 +165,7 @@ export function createInput() {
   return {
     sample, consumePressed, clearPressed,
     bindZones, bindHold,
-    enableMotion, recenterTilt, setTiltSensitivity, setTiltInvert, isMotionActive,
+    enableMotion, recenterTilt, setTiltSensitivity, setTiltInvert, isMotionActive, deviceRoll,
     _keys: keys,
   };
 }

@@ -247,6 +247,7 @@ export function createAudio() {
     const st = RADIO_STATIONS[stationIndex];
     audioEl.src = playlist[trackIndex];
     audioEl.loop = playlist.length === 1 && !st.stream; // single song loops; playlists advance
+    audioEl.muted = muted; // .muted is the iOS-reliable mute (volume is read-only there)
     audioEl.volume = muted ? 0 : musicVol;
     audioEl.play().catch(() => {
       radioOn = false;
@@ -296,7 +297,10 @@ export function createAudio() {
   function setMuted(m) {
     muted = m;
     if (master) master.gain.setTargetAtTime(m ? 0 : masterVol, ctx.currentTime, 0.05);
-    if (audioEl) audioEl.volume = m ? 0 : musicVol; // URL stations aren't on the master bus
+    // The URL radio plays through a plain <audio> (off the Web Audio master bus).
+    // On iOS `.volume` is read-only (hardware-controlled), so `.muted` is what
+    // actually silences it — set both for cross-platform coverage.
+    if (audioEl) { audioEl.muted = m; audioEl.volume = m ? 0 : musicVol; }
   }
   function setMusicVol(v) {
     musicVol = v;
