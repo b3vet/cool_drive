@@ -1,0 +1,10 @@
+# keep the Docker build context small (these aren't needed in the image)
+.claude
+.git
+.gitignore
+node_modules
+server.js
+test_physics.mjs
+package.json
+*.log
+.DS_Store

@@ -1,0 +1,11 @@
+{
+  "name": "cool-drive",
+  "version": "0.1.0",
+  "description": "A drift-focused 3D car driving game built with three.js, inspired by slowdrive.io",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "license": "MIT"
+}

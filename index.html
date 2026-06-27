@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>CoolDrive — drift</title>
+<style>
+  :root {
+    --fg: #f4f7ff;
+    --accent: #33e0a1;
+    --gold: #ffd24a;
+    --panel: rgba(14, 18, 32, 0.74);
+    --panel-soft: rgba(20, 26, 44, 0.55);
+    --shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; background: #0b1020;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--fg); -webkit-user-select: none; user-select: none; touch-action: none;
+  }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+  kbd { background: rgba(255,255,255,.14); border-radius: 5px; padding: 1px 6px; font-weight: 700; font-family: inherit; font-size: 11px; }
+
+  /* ---------- HUD ---------- */
+  .hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  #scoreWrap { position: fixed; top: 18px; left: 22px; }
+  #score { font-size: clamp(34px, 6vw, 64px); font-weight: 800; letter-spacing: -1px; line-height: 1; text-shadow: 0 3px 14px rgba(0,0,0,.55); font-variant-numeric: tabular-nums; }
+  #best { margin-top: 4px; font-size: 13px; font-weight: 700; opacity: .72; letter-spacing: .12em; }
+  #best.flash { animation: bestPop 1.2s ease; color: var(--gold); }
+  @keyframes bestPop { 0%,100%{transform:scale(1)} 30%{transform:scale(1.35); color:var(--gold)} }
+
+  #combo { position: fixed; left: 50%; bottom: 13%; transform: translateX(-50%) scale(1); --c: #33e0a1; text-align: center; opacity: 0; transition: opacity .15s ease; transform-origin: center bottom; will-change: transform; }
+  #combo.show { opacity: 1; }
+  #combo.fail #comboVal { animation: shake .35s; color: #ff5a4d !important; }
+  #comboVal { font-size: clamp(40px, 8vw, 80px); font-weight: 900; color: var(--c); text-shadow: 0 0 24px var(--c), 0 4px 18px rgba(0,0,0,.6); line-height: 1; font-variant-numeric: tabular-nums; }
+  #banked { font-size: clamp(16px, 3vw, 26px); font-weight: 800; opacity: .92; margin-top: 2px; }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-8px)} 75%{transform:translateX(8px)} }
+
+  #driftFloat { position: fixed; left: 50%; bottom: 26%; transform: translateX(-50%) translateY(8px); font-weight: 900; letter-spacing: .35em; font-size: 14px; color: var(--accent); opacity: 0; transition: opacity .12s ease, transform .12s ease; text-shadow: 0 0 18px var(--accent); }
+  #driftFloat.show { opacity: .9; transform: translateX(-50%) translateY(0); }
+
+  #bankFlash { position: fixed; top: 78px; left: 30px; font-size: 22px; font-weight: 800; color: var(--accent); opacity: 0; pointer-events: none; }
+  #bankFlash.play { animation: floatUp 1s ease-out forwards; }
+  @keyframes floatUp { 0%{opacity:1; transform: translateY(0)} 100%{opacity:0; transform: translateY(-44px)} }
+
+  /* center celebration flourish (combo complete / new best) */
+  #celebrate { position: fixed; left: 50%; top: 38%; transform: translate(-50%,-50%); text-align: center; pointer-events: none; opacity: 0; z-index: 7; }
+  #celebrate.play { animation: celebrate 1.5s cubic-bezier(.2,.8,.2,1) forwards; }
+  #celebrate .big { font-size: clamp(30px, 6vw, 62px); font-weight: 900; letter-spacing: -1px; }
+  #celebrate .sub { font-size: clamp(16px, 3vw, 28px); font-weight: 800; margin-top: 4px; }
+  @keyframes celebrate { 0%{opacity:0; transform:translate(-50%,-50%) scale(.6)} 15%{opacity:1; transform:translate(-50%,-50%) scale(1.1)} 30%{transform:translate(-50%,-50%) scale(1)} 80%{opacity:1} 100%{opacity:0; transform:translate(-50%,-58%) scale(1)} }
+
+  #speedWrap { position: fixed; right: 24px; bottom: 22px; text-align: right; }
+  #speed { font-size: clamp(40px, 7vw, 66px); font-weight: 800; line-height: .9; font-variant-numeric: tabular-nums; text-shadow: 0 3px 14px rgba(0,0,0,.5); }
+  #speedWrap .unit { font-size: 13px; font-weight: 700; opacity: .6; letter-spacing: .15em; }
+  #boostBar { margin-top: 10px; width: 168px; height: 9px; border-radius: 6px; background: rgba(255,255,255,.14); overflow: hidden; margin-left: auto; }
+  #boostFill { height: 100%; width: 0%; border-radius: 6px; background: linear-gradient(90deg, #4ad6ff, #33e0a1); transition: width .08s linear; }
+  #boostFill.ready { background: linear-gradient(90deg, #ffd24a, #ff7a1a); box-shadow: 0 0 14px #ffb23a; }
+  #boostFill.active { background: linear-gradient(90deg, #ff7a1a, #ff3b6b); }
+  #presetName { position: fixed; top: 20px; right: 24px; font-size: 12px; font-weight: 700; letter-spacing: .14em; opacity: .6; }
+
+  /* ---------- achievement toasts ---------- */
+  #toasts { position: fixed; top: 64px; right: 18px; z-index: 9; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+  .toast { display: flex; align-items: center; gap: 12px; background: var(--panel); border: 1px solid rgba(255,255,255,.12); border-left: 3px solid var(--gold); border-radius: 12px; padding: 12px 16px 12px 13px; box-shadow: var(--shadow); min-width: 230px; animation: toastIn .5s cubic-bezier(.2,.9,.2,1), toastOut .5s ease 4s forwards; backdrop-filter: blur(8px); }
+  .toast .ic { font-size: 30px; filter: drop-shadow(0 0 8px rgba(255,210,74,.6)); }
+  .toast .t1 { font-size: 11px; font-weight: 800; letter-spacing: .12em; color: var(--gold); }
+  .toast .t2 { font-size: 15px; font-weight: 800; }
+  .toast .t3 { font-size: 12px; opacity: .7; }
+  @keyframes toastIn { from { transform: translateX(120%); opacity: 0 } to { transform: translateX(0); opacity: 1 } }
+  @keyframes toastOut { to { transform: translateX(120%); opacity: 0 } }
+
+  /* ---------- radio widget ---------- */
+  #radio { position: fixed; left: 22px; bottom: 22px; z-index: 6; display: flex; align-items: center; gap: 8px; background: var(--panel-soft); border: 1px solid rgba(255,255,255,.1); border-radius: 999px; padding: 7px 10px; backdrop-filter: blur(8px); pointer-events: auto; font-size: 12px; }
+  #radio button { pointer-events: auto; cursor: pointer; border: none; background: rgba(255,255,255,.1); color: var(--fg); width: 26px; height: 26px; border-radius: 50%; font-size: 13px; display: grid; place-items: center; font-family: inherit; }
+  #radio button:hover { background: rgba(255,255,255,.22); }
+  #radioPower.on { background: var(--accent); color: #06231a; }
+  #radioName { min-width: 92px; font-weight: 700; opacity: .9; }
+  #radioName .eq { color: var(--accent); }
+  body.touch #radio { left: 50%; transform: translateX(-50%); bottom: 14px; }
+
+  #hint { position: fixed; bottom: 56px; left: 50%; transform: translateX(-50%); font-size: 12px; opacity: .42; font-weight: 600; text-align: center; pointer-events: none; }
+  body.touch #hint { display: none; }
+
+  /* ---------- start screen ---------- */
+  #startScreen { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: radial-gradient(120% 120% at 50% 20%, rgba(11,16,32,.25), rgba(11,16,32,.86)); backdrop-filter: blur(3px); transition: opacity .5s ease; overflow-y: auto; }
+  #startScreen.hidden { opacity: 0; pointer-events: none; }
+  .card { text-align: center; padding: 18px; max-width: 720px; width: 94%; }
+  .logo { font-size: clamp(40px, 9vw, 88px); font-weight: 900; letter-spacing: -3px; line-height: .92; background: linear-gradient(180deg, #fff, #9fe9cf); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: 0 14px 60px rgba(51,224,161,.25); }
+  .logo span { color: var(--accent); -webkit-text-fill-color: var(--accent); }
+  .tag { margin: 8px 0 18px; font-size: clamp(13px, 2.2vw, 18px); opacity: .82; font-weight: 600; }
+  .tag b { color: var(--accent); }
+
+  .seclabel { font-size: 11px; font-weight: 800; letter-spacing: .18em; opacity: .55; margin: 14px 0 8px; }
+  .modes { display: flex; gap: 12px; justify-content: center; }
+  .mode { pointer-events: auto; cursor: pointer; flex: 1; max-width: 240px; background: var(--panel-soft); border: 2px solid rgba(255,255,255,.1); border-radius: 14px; padding: 12px 14px; text-align: left; transition: .15s; }
+  .mode:hover { background: rgba(255,255,255,.08); }
+  .mode.sel { border-color: var(--accent); background: rgba(51,224,161,.12); box-shadow: 0 0 24px rgba(51,224,161,.2); }
+  .mode .mname { font-size: 16px; font-weight: 900; letter-spacing: .04em; }
+  .mode .mblurb { font-size: 11.5px; opacity: .72; margin-top: 4px; line-height: 1.35; }
+
+  .cars { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .carcard { pointer-events: auto; cursor: pointer; width: 150px; background: var(--panel-soft); border: 2px solid rgba(255,255,255,.1); border-radius: 14px; padding: 12px; transition: .15s; }
+  .carcard:hover { transform: translateY(-2px); background: rgba(255,255,255,.07); }
+  .carcard.sel { border-color: var(--accent); box-shadow: 0 0 24px rgba(51,224,161,.2); }
+  .carcard .swatch { height: 46px; border-radius: 10px; margin-bottom: 8px; box-shadow: inset 0 -10px 18px rgba(0,0,0,.3); position: relative; overflow: hidden; }
+  .carcard .swatch::after { content:''; position:absolute; left:14%; right:14%; bottom:6px; height:14px; border-radius:6px; background: rgba(0,0,0,.35); }
+  .carcard .cname { font-size: 14px; font-weight: 800; }
+  .carcard .ctag { font-size: 11px; opacity: .65; margin-top: 2px; }
+
+  #btnStart { pointer-events: auto; cursor: pointer; margin-top: 20px; border: none; border-radius: 999px; padding: 15px 48px; font-size: 18px; font-weight: 800; color: #06231a; background: linear-gradient(180deg, #5cf2bf, #2bc88a); box-shadow: var(--shadow), 0 0 30px rgba(51,224,161,.4); transition: transform .12s ease; font-family: inherit; }
+  #btnStart:hover { transform: translateY(-2px) scale(1.03); }
+  .startfoot { margin-top: 14px; font-size: 12px; opacity: .6; }
+  .startfoot b { color: var(--accent); }
+
+  /* ---------- settings panel ---------- */
+  #settings { position: fixed; top: 0; right: 0; height: 100%; width: 320px; z-index: 30; background: var(--panel); backdrop-filter: blur(12px); box-shadow: var(--shadow); transform: translateX(100%); transition: transform .28s cubic-bezier(.4,0,.2,1); padding: 24px; pointer-events: auto; border-left: 1px solid rgba(255,255,255,.08); overflow-y: auto; }
+  #settings.open { transform: translateX(0); }
+  #settings h2 { margin: 0 0 4px; font-size: 18px; }
+  #settings .sub { font-size: 12px; opacity: .55; margin-bottom: 18px; }
+  .row { margin-bottom: 16px; }
+  .row label { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 7px; }
+  .row label span { opacity: .7; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  #presetBtn { width: 100%; margin-top: 4px; padding: 10px; border-radius: 10px; cursor: pointer; border: 1px solid rgba(255,255,255,.16); background: var(--panel-soft); color: var(--fg); font-weight: 700; font-family: inherit; font-size: 13px; }
+  #presetBtn:hover { background: rgba(255,255,255,.1); }
+  .achsec { margin-top: 22px; border-top: 1px solid rgba(255,255,255,.1); padding-top: 16px; }
+  .achsec h3 { margin: 0 0 10px; font-size: 13px; letter-spacing: .1em; opacity: .8; }
+  #achList { display: flex; flex-direction: column; gap: 7px; }
+  .ach { display: flex; align-items: center; gap: 10px; font-size: 12px; opacity: .4; }
+  .ach.got { opacity: 1; }
+  .ach .ai { font-size: 18px; width: 22px; text-align: center; filter: grayscale(1); }
+  .ach.got .ai { filter: none; }
+  .ach .an { font-weight: 700; }
+  .ach .ad { opacity: .65; font-size: 11px; }
+  #settings .esc { margin-top: 18px; font-size: 11px; opacity: .5; }
+
+  /* ---------- touch controls ---------- */
+  .touchUI { display: none; }
+  body.touch .touchUI { display: block; }
+  #joy { position: fixed; left: 26px; bottom: 70px; width: 124px; height: 124px; border-radius: 50%; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); z-index: 6; pointer-events: auto; touch-action: none; }
+  #knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: rgba(255,255,255,.28); border: 1px solid rgba(255,255,255,.4); }
+  .tbtn { position: fixed; width: 74px; height: 74px; border-radius: 50%; z-index: 6; pointer-events: auto; display: grid; place-items: center; font-weight: 800; font-size: 12px; color: #fff; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); touch-action: none; }
+  #btnGas   { right: 26px; bottom: 120px; background: rgba(51,224,161,.22); border-color: rgba(51,224,161,.5); }
+  #btnBrake { right: 118px; bottom: 50px; background: rgba(255,90,77,.18); border-color: rgba(255,90,77,.45); }
+  #btnHand  { right: 26px; bottom: 36px; background: rgba(74,214,255,.18); border-color: rgba(74,214,255,.45); }
+  #btnBoost { right: 118px; bottom: 138px; background: rgba(255,178,58,.2); border-color: rgba(255,178,58,.5); }
+  .tbtn.active { filter: brightness(1.5); box-shadow: inset 0 0 16px rgba(0,0,0,.35); transform: scale(0.93); }
+</style>
+
+<script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app"></div>
+
+<!-- HUD -->
+<div class="hud">
+  <div id="scoreWrap"><div id="score">0</div><div id="best">BEST 0</div></div>
+  <div id="bankFlash"></div>
+  <div id="presetName">Golden Hour</div>
+  <div id="celebrate"><div class="big"></div><div class="sub"></div></div>
+  <div id="driftFloat">D R I F T</div>
+  <div id="combo"><div id="comboVal">×1.0</div><div id="banked">+0</div></div>
+  <div id="speedWrap"><div id="speed">0</div><div class="unit">KM/H</div><div id="boostBar"><div id="boostFill"></div></div></div>
+</div>
+
+<div id="toasts"></div>
+
+<div id="radio">
+  <button id="radioPower" title="Radio on/off">♪</button>
+  <span id="radioName">Radio off</span>
+  <button id="radioNext" title="Next station">›</button>
+  <button id="radioMute" title="Mute all sound">🔊</button>
+</div>
+
+<div id="hint"><kbd>WASD</kbd> drive · <kbd>Space</kbd> handbrake · <kbd>Shift</kbd> boost · <kbd>C</kbd> cam · <kbd>R</kbd> reset · <kbd>M</kbd> mute · <kbd>Esc</kbd> settings</div>
+
+<!-- touch controls -->
+<div class="touchUI">
+  <div id="joy"><div id="knob"></div></div>
+  <div id="btnGas" class="tbtn">GAS</div>
+  <div id="btnBrake" class="tbtn">BRAKE</div>
+  <div id="btnHand" class="tbtn">DRIFT</div>
+  <div id="btnBoost" class="tbtn">BOOST</div>
+</div>
+
+<!-- settings -->
+<div id="settings">
+  <h2>Settings</h2>
+  <div class="sub">Fine-tune the feel (your mode sets the baseline).</div>
+  <div class="row"><label>Drift Assist <span id="assistVal">1.0</span></label><input id="assist" type="range" min="0" max="4" step="0.1" value="1.0" /></div>
+  <div class="row"><label>Drift Grip <span id="gripDriftVal">0.55</span></label><input id="gripDrift" type="range" min="0.3" max="4" step="0.05" value="0.55" /></div>
+  <div class="row"><label>Power <span id="engineVal">22</span></label><input id="engine" type="range" min="12" max="32" step="1" value="22" /></div>
+  <div class="row"><label>Car volume <span id="sfxVal">85</span></label><input id="sfx" type="range" min="0" max="100" step="1" value="85" /></div>
+  <div class="row"><label>Music volume <span id="musicVal">50</span></label><input id="music" type="range" min="0" max="100" step="1" value="50" /></div>
+  <div class="row"><label>Graphics <span style="opacity:.5">(lower = cooler)</span></label>
+    <select id="quality" style="width:100%;padding:9px;border-radius:9px;background:var(--panel-soft);color:var(--fg);border:1px solid rgba(255,255,255,.16);font-family:inherit;font-size:13px;">
+      <option value="high">High</option><option value="medium">Medium</option><option value="low">Low (cool &amp; quiet)</option>
+    </select>
+  </div>
+  <div class="row"><button id="presetBtn">Change Time of Day</button></div>
+  <div class="achsec"><h3>ACHIEVEMENTS <span id="achCount" style="opacity:.6;font-weight:600"></span></h3><div id="achList"></div></div>
+  <div class="esc">Press <kbd>Esc</kbd> to close</div>
+</div>
+
+<!-- start screen -->
+<div id="startScreen">
+  <div class="card">
+    <div class="logo">COOL<span>DRIVE</span></div>
+    <div class="tag">An open drift world where the car <b>almost drives itself</b>.</div>
+
+    <div class="seclabel">DRIVING MODE</div>
+    <div class="modes" id="modeRow"></div>
+
+    <div class="seclabel">PICK YOUR CAR</div>
+    <div class="cars" id="carRow"></div>
+
+    <button id="btnStart">DRIVE</button>
+    <div class="startfoot"><b id="achProgress">0/0</b> achievements · sound starts on drive (<kbd>M</kbd> to mute)</div>
+  </div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
