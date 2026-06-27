@@ -17,6 +17,7 @@ export function createChaseCam(camera, car) {
   let started = false;
   let framedX = 0; // smoothed lateral drift-frame offset
   let rollSmoothed = 0; // counter-roll to keep the view level while tilting the phone
+  let rollBaseline = 0; // slowly-adapting reference so a held tilt never gets "stuck"
 
   // place the look anchor (ahead of the car)
   car.lookTarget.position.set(0, CAM.lookUp, -CAM.lookAhead);
@@ -72,8 +73,12 @@ export function createChaseCam(camera, car) {
     camera.position.lerp(goalWorld, MODES[mode] === 'overhead' ? Math.min(dt * 6, 1) : posT);
     smoothedLook.lerp(lookWorld, MODES[mode] === 'overhead' ? Math.min(dt * 6, 1) : lookT);
     camera.lookAt(smoothedLook);
-    // counter-roll the view by the phone's tilt so the world stays level on screen
-    rollSmoothed += (rollTarget - rollSmoothed) * Math.min(dt * 14, 1);
+    // Counter-roll the view so you can see WHILE tilting, but auto-recenter so a
+    // held tilt (or a calibration offset) eases back to level instead of getting
+    // stuck: compensate the CHANGE in tilt, let a slow baseline absorb the rest.
+    rollBaseline += (rollTarget - rollBaseline) * Math.min(dt * 0.6, 1); // slow adapt (~1.6s)
+    const rel = rollTarget - rollBaseline;
+    rollSmoothed += (rel - rollSmoothed) * Math.min(dt * 14, 1); // fast track the change
     if (Math.abs(rollSmoothed) > 1e-4) camera.rotateZ(rollSmoothed);
 
     // FOV punch with speed + boost
