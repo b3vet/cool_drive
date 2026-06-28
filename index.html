@@ -99,7 +99,10 @@
 
   /* ---------- start screen ---------- */
   #startScreen { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: radial-gradient(120% 120% at 50% 20%, rgba(11,16,32,.25), rgba(11,16,32,.86)); backdrop-filter: blur(3px); transition: opacity .5s ease; overflow-y: auto; }
-  #startScreen.hidden { opacity: 0; pointer-events: none; }
+  /* when hidden, make the WHOLE subtree non-interactive — children set pointer-events:auto
+     which would otherwise stay tappable over the play area (eating handbrake taps etc.) */
+  #startScreen.hidden { opacity: 0; pointer-events: none; visibility: hidden; transition: opacity .5s ease, visibility 0s linear .5s; }
+  #startScreen.hidden * { pointer-events: none; }
   .card { text-align: center; padding: 18px; max-width: 720px; width: 94%; }
   .logo { font-size: clamp(40px, 9vw, 88px); font-weight: 900; letter-spacing: -3px; line-height: .92; background: linear-gradient(180deg, #fff, #9fe9cf); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: 0 14px 60px rgba(51,224,161,.25); }
   .logo span { color: var(--accent); -webkit-text-fill-color: var(--accent); }
@@ -162,12 +165,18 @@
   /* ---------- mobile controls (invisible touch zones + tilt steering) ------- */
   #touchLayer { position: fixed; inset: 0; z-index: 4; display: none; touch-action: none; }
   body.mobile #touchLayer { display: block; }
-  .zoneHint { position: absolute; font-weight: 800; letter-spacing: .2em; font-size: 12px; opacity: 0; color: rgba(255,255,255,.55); pointer-events: none; white-space: nowrap; }
-  body.mobile.playing .zoneHint { animation: zoneFade 6s ease forwards; }
-  @keyframes zoneFade { 0%, 55% { opacity: .5 } 100% { opacity: 0 } }
-  .zh-brake { left: 6%; top: 50%; transform: translateY(-50%); }
-  .zh-gas { right: 6%; top: 50%; transform: translateY(-50%); }
-  .zh-hand { left: 50%; bottom: 6%; transform: translateX(-50%); }
+  .zoneBg, .zoneHint { position: absolute; opacity: 0; pointer-events: none; }
+  body.mobile.playing .zoneBg, body.mobile.playing .zoneHint { animation: zoneFade 9s ease forwards; }
+  @keyframes zoneFade { 0% { opacity: 0 } 6% { opacity: 1 } 72% { opacity: 1 } 100% { opacity: 0 } }
+  .zoneBg { top: 0; height: 80%; }
+  .zb-brake { left: 0; width: 50%; background: linear-gradient(90deg, rgba(255,90,77,.22), transparent 80%); border-right: 1px dashed rgba(255,255,255,.12); }
+  .zb-gas { right: 0; width: 50%; background: linear-gradient(270deg, rgba(51,224,161,.22), transparent 80%); }
+  .zb-hand { left: 0; right: 0; top: auto; bottom: 0; height: 20%; width: 100%; background: linear-gradient(0deg, rgba(74,214,255,.24), transparent 90%); border-top: 1px dashed rgba(255,255,255,.16); }
+  .zoneHint { font-weight: 900; letter-spacing: .12em; font-size: 16px; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,.6); white-space: nowrap; text-align: center; line-height: 1.25; }
+  .zh-steer { top: 10%; left: 50%; transform: translateX(-50%); color: var(--accent); text-shadow: 0 0 14px var(--accent); }
+  .zh-brake { left: 9%; top: 42%; transform: translateY(-50%); color: #ff8a80; }
+  .zh-gas { right: 9%; top: 42%; transform: translateY(-50%); color: #7cf0c8; }
+  .zh-hand { left: 50%; bottom: 4%; transform: translateX(-50%); color: #8fd9ff; }
 
   #gearBtn { position: fixed; top: 16px; right: 16px; z-index: 8; width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgba(255,255,255,.16); background: var(--panel-soft); color: var(--fg); font-size: 21px; cursor: pointer; display: grid; place-items: center; backdrop-filter: blur(6px); pointer-events: auto; }
   #gearBtn:hover { background: rgba(255,255,255,.12); }
@@ -198,6 +207,38 @@
   .mobileOnly { display: none; }
   body.mobile .mobileOnly { display: block; }
   body.mobile #hint { display: none; }
+
+  /* start-screen control guide (mobile) */
+  .ctrlGuide { display: none; margin-top: 14px; }
+  body.mobile .ctrlGuide { display: block; }
+  .cg-screen { position: relative; width: 230px; height: 122px; margin: 0 auto; border: 2px solid rgba(255,255,255,.28); border-radius: 12px; overflow: hidden; font-weight: 800; font-size: 13px; letter-spacing: .06em; }
+  .cg-half { position: absolute; top: 0; height: 74%; width: 50%; display: grid; place-items: center; }
+  .cg-brake { left: 0; background: rgba(255,90,77,.22); color: #ff8a80; border-right: 1px dashed rgba(255,255,255,.2); }
+  .cg-gas { right: 0; background: rgba(51,224,161,.2); color: #7cf0c8; }
+  .cg-hand { position: absolute; bottom: 0; left: 0; right: 0; height: 26%; display: grid; place-items: center; background: rgba(74,214,255,.22); color: #8fd9ff; font-size: 11px; }
+  .cg-steer { position: absolute; top: 7px; left: 0; right: 0; z-index: 1; text-align: center; color: var(--accent); font-size: 11px; }
+  .cg-cap { margin-top: 9px; font-size: 12px; opacity: .72; }
+
+  /* compact + top-aligned start screen for the short mobile-landscape viewport */
+  body.mobile #startScreen { align-items: start; padding: 8px 0 20px; }
+  body.mobile .card { padding: 6px 14px; }
+  body.mobile .logo { font-size: 40px; letter-spacing: -2px; }
+  body.mobile .tag { margin: 3px 0 8px; font-size: 12px; }
+  body.mobile .seclabel { margin: 7px 0 4px; font-size: 10px; }
+  body.mobile .modes { gap: 8px; }
+  body.mobile .mode { padding: 7px 11px; }
+  body.mobile .mode .mname { font-size: 14px; }
+  body.mobile .mode .mblurb { display: none; }
+  body.mobile .cars { gap: 8px; }
+  body.mobile .carcard { width: 110px; padding: 7px; }
+  body.mobile .carcard .swatch { height: 30px; margin-bottom: 5px; }
+  body.mobile .carcard .cname { font-size: 12px; }
+  body.mobile .carcard .ctag { display: none; }
+  body.mobile #btnStart { padding: 11px 40px; margin-top: 10px; font-size: 16px; }
+  body.mobile .ctrlGuide { margin-top: 8px; }
+  body.mobile .cg-screen { width: 200px; height: 86px; }
+  body.mobile .cg-cap { margin-top: 5px; font-size: 11px; }
+  body.mobile .startfoot { margin-top: 6px; font-size: 11px; }
 </style>
 
 <script async src="./vendor/es-module-shims.js"></script>
@@ -235,10 +276,15 @@
 
 <div id="hint"><kbd>WASD</kbd> drive · <kbd>Space</kbd> handbrake · <kbd>Shift</kbd> boost · <kbd>C</kbd> cam · <kbd>R</kbd> reset · <kbd>M</kbd> mute · <kbd>Esc</kbd> settings</div>
 
-<!-- mobile: invisible touch zones (steering is gyro) -->
+<!-- mobile: invisible touch zones (steering is gyro). Coloured regions + labels
+     flash on start so newcomers learn the layout, then fade away. -->
 <div id="touchLayer">
-  <div class="zoneHint zh-brake">◀ BRAKE</div>
-  <div class="zoneHint zh-gas">GAS ▶</div>
+  <div class="zoneBg zb-brake"></div>
+  <div class="zoneBg zb-gas"></div>
+  <div class="zoneBg zb-hand"></div>
+  <div class="zoneHint zh-steer">↔ TILT TO STEER ↔</div>
+  <div class="zoneHint zh-brake">◀<br>BRAKE</div>
+  <div class="zoneHint zh-gas">GAS<br>▶</div>
   <div class="zoneHint zh-hand">▼ HANDBRAKE ▼</div>
 </div>
 <div id="btnBoostM">⚡<span>BOOST</span></div>
@@ -288,7 +334,15 @@
 
     <button id="btnStart">DRIVE</button>
     <div class="startfoot"><b id="achProgress">0/0</b> achievements · sound starts on drive</div>
-    <div class="startfoot mobileOnly" style="margin-top:6px">📱 <b>Tilt</b> to steer · hold <b>right</b> = gas · <b>left</b> = brake · <b>bottom</b> = handbrake</div>
+    <div class="ctrlGuide mobileOnly">
+      <div class="cg-screen">
+        <div class="cg-steer">↔ TILT PHONE = STEER ↔</div>
+        <div class="cg-half cg-brake">BRAKE</div>
+        <div class="cg-half cg-gas">GAS</div>
+        <div class="cg-hand">HANDBRAKE</div>
+      </div>
+      <div class="cg-cap">Hold each area with your thumbs · tilt the phone to steer</div>
+    </div>
     <div class="startfoot" id="secureWarn" style="display:none;color:#ffb23a;margin-top:6px">⚠ Tilt steering needs HTTPS (iOS blocks motion on http://). It works in the App Store build, or test over an HTTPS tunnel — see MOBILE.md.</div>
     <div class="startfoot" id="a2hsHint" style="display:none;margin-top:8px">📲 For <b>true fullscreen</b> (no Safari bars): tap <b>Share</b> → <b>Add to Home Screen</b>, then open CoolDrive from your home screen.</div>
   </div>
