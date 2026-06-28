@@ -178,10 +178,21 @@ function cyclePreset() {
   audio.sfx.ui();
 }
 
-// ---- start-screen UI (modes + cars) ---------------------------------------
+// ---- car/mode selection (start screen + settings) -------------------------
 function refreshSel() {
   document.querySelectorAll('.mode').forEach((m) => m.classList.toggle('sel', m.dataset.mode === mode));
-  document.querySelectorAll('.carcard').forEach((c) => c.classList.toggle('sel', Number(c.dataset.i) === selectedCarIndex));
+  document.querySelectorAll('.carcard, .settingsCar').forEach((c) => c.classList.toggle('sel', Number(c.dataset.i) === selectedCarIndex));
+}
+// switch car. resetPos=true on the start screen; false when changing mid-game in settings
+function selectCar(i, resetPos) {
+  selectedCarIndex = i;
+  buildSelectedCar();
+  if (resetPos) { resetCarState(); prev = snapshot(carState); curr = snapshot(carState); }
+  applyTuning();
+  ach.event('car', CARS[i].id);
+  refreshSel();
+  audio.sfx.select();
+  drainAchievements();
 }
 function buildStartUI() {
   const modeRow = el('modeRow');
@@ -202,20 +213,22 @@ function buildStartUI() {
     d.className = 'carcard';
     d.dataset.i = i;
     d.innerHTML = `<div class="swatch" style="background:linear-gradient(160deg, ${hex(c.color)}, ${darken(c.color)})"></div><div class="cname">${c.name}</div><div class="ctag">${c.tag}</div>`;
-    d.addEventListener('click', (e) => {
-      e.stopPropagation();
-      selectedCarIndex = i;
-      buildSelectedCar();
-      resetCarState();
-      prev = snapshot(carState); curr = snapshot(carState);
-      applyTuning();
-      ach.event('car', c.id);
-      refreshSel();
-      audio.sfx.select();
-      drainAchievements();
-    });
+    d.addEventListener('click', (e) => { e.stopPropagation(); selectCar(i, true); });
     carRow.appendChild(d);
   });
+  // compact car switcher in Settings (change car mid-game, no reload)
+  const setRow = el('settingsCarRow');
+  if (setRow) {
+    setRow.innerHTML = '';
+    CARS.forEach((c, i) => {
+      const b = document.createElement('button');
+      b.className = 'settingsCar';
+      b.dataset.i = i;
+      b.innerHTML = `<span class="sw" style="background:${hex(c.color)}"></span>${c.name}`;
+      b.addEventListener('click', () => selectCar(i, false));
+      setRow.appendChild(b);
+    });
+  }
   refreshSel();
 }
 
@@ -335,7 +348,7 @@ function frame(now) {
 
   applyCarVisual(car, render, carState, cmd, dt);
   trackSun();
-  if (cam) cam.update(carState, dt, isMobile && input.isMotionActive() ? input.deviceRoll() * 1.15 : 0);
+  if (cam) cam.update(carState, dt, isMobile && input.isMotionActive() ? input.deviceRoll() * 0.6 : 0);
   effects.update(render, car.rearOffsets, carState, dt);
   updateCones(world, dt);
   updatePosts(world, dt);

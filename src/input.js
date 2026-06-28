@@ -72,7 +72,9 @@ export function createInput() {
   // raw screen-roll (radians) for the camera to counter so the view stays level
   const deviceRoll = () => {
     if (!motionActive || tiltNeutral === null) return 0;
-    return clamp(tiltRaw - tiltNeutral, -55, 55) * (Math.PI / 180);
+    let d = tiltRaw - tiltNeutral;
+    if (tiltInvert) d = -d; // same inversion as steering, so the view rolls the correct way
+    return clamp(d, -55, 55) * (Math.PI / 180);
   };
 
   // ---- touch zones (multi-touch) -------------------------------------------

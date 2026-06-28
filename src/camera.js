@@ -78,7 +78,7 @@ export function createChaseCam(camera, car) {
     // stuck: compensate the CHANGE in tilt, let a slow baseline absorb the rest.
     rollBaseline += (rollTarget - rollBaseline) * Math.min(dt * 0.6, 1); // slow adapt (~1.6s)
     const rel = rollTarget - rollBaseline;
-    rollSmoothed += (rel - rollSmoothed) * Math.min(dt * 14, 1); // fast track the change
+    rollSmoothed += (rel - rollSmoothed) * Math.min(dt * 9, 1); // track the change (gentle)
     if (Math.abs(rollSmoothed) > 1e-4) camera.rotateZ(rollSmoothed);
 
     // FOV punch with speed + boost
