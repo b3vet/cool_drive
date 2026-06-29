@@ -41,50 +41,44 @@ Open the deployed HTTPS site on the phone → **Share → Add to Home Screen**. 
 fullscreen, landscape, and works offline after the first load. (Apple does **not** list
 PWAs in the App Store — for that, use Capacitor below.)
 
-## Ship to the App Store with Capacitor
+## The native iOS app (Capacitor) — already set up ✅
 
-Capacitor wraps the existing web game in a native iOS shell (WKWebView) and gives you an
-Xcode project to submit. Near-zero rewrite.
+The `ios/` Xcode project is built and **verified to compile and run in the iOS Simulator**
+(the game renders fullscreen, landscape, with audio bundled). Already done for you:
+- Capacitor installed; `www/` is the web bundle (assembled by `npm run build:web`).
+- `ios/App/` Xcode project generated — bundle id `io.cooldrive.app`, name **CoolDrive**.
+- **Landscape-only**, **status bar hidden** (fullscreen), and **`NSMotionUsageDescription`**
+  (the gyroscope permission) all set in `ios/App/App/Info.plist`.
+- three.js and the MP3 radio are bundled, so the app runs **fully offline** — no hosting,
+  no HTTPS needed (`capacitor://localhost` is a secure context, so the gyro works too).
 
-### Prerequisites
-- A Mac with **Xcode** installed.
-- Your **Apple Developer** account (you have this).
-- Node.js (you have this).
-
-### One-time setup (run on your Mac, in this folder)
+### After you change the game (rebuild the app's bundle)
 ```bash
-npm install @capacitor/core @capacitor/cli @capacitor/ios
-npm run build:web          # assembles ./www (the webDir Capacitor uses)
-npx cap add ios            # creates the ios/ native project
+npm run ios          # = build:web + cap sync ios + open Xcode
+# or, without opening Xcode:  npm run ios:sync
 ```
-`capacitor.config.json` is already here (appId `io.cooldrive.app`, appName `CoolDrive`,
-webDir `www`) — change `appId` to your reverse-domain bundle id.
 
-### Each time you change the game
-```bash
-npm run ios                # = build:web + cap sync ios + cap open ios
-```
-This rebuilds `www`, copies it into the iOS project, and opens Xcode.
+### Run it on your own iPhone
+1. `npm run ios` (opens the project in Xcode).
+2. Select the **App** target → **Signing & Capabilities** → pick your **Team** (your Apple
+   Developer account). If `io.cooldrive.app` is taken, change the **Bundle Identifier** to
+   your own reverse-domain id (and update `appId` in `capacitor.config.json` to match).
+3. Plug in your iPhone, choose it as the run destination, press **▶ Run**.
+   (The Simulator has **no gyroscope** — test tilt steering on the real device.)
 
-### In Xcode (one-time configuration)
-1. **Signing & Capabilities** → select your **Team** (your Apple Developer account).
-   Set a unique **Bundle Identifier**.
-2. **General → Deployment Info → Device Orientation**: check **Landscape Left** and
-   **Landscape Right** only (uncheck portrait) so it's landscape-locked.
-3. **Info.plist** → add **`NSMotionUsageDescription`** with a string like
-   *"Used to steer the car by tilting your device."* — required for the gyroscope.
-4. **App icons / splash:** generate them from `icon.svg` (export a 1024×1024 PNG first):
-   ```bash
-   npm install -D @capacitor/assets
-   npx capacitor-assets generate --ios   # uses a 1024px source icon
-   ```
-5. Pick your device (or a simulator — note the simulator has no gyroscope, so steering
-   won't work there; test tilt on a real device) and press **Run**.
+### Share it — TestFlight (the iOS way to distribute without a full release)
+Up to 10,000 testers via an email invite or a public link.
+1. **App icons** (one-time): export a 1024×1024 PNG from `icon.svg`, then
+   `npm install -D @capacitor/assets && npx capacitor-assets generate --ios`.
+2. In Xcode set the destination to **Any iOS Device (arm64)** → **Product → Archive**.
+3. When the Organizer opens: **Distribute App → TestFlight & App Store Connect → Upload**.
+4. In **App Store Connect → CoolDrive → TestFlight**: once processed, add testers —
+   **Internal** (your own devices, instant) or **External** with the **public link** to
+   share with anyone. Testers install the free **TestFlight** app and open your link.
 
-### Submit
-- **Product → Archive** → **Distribute App → App Store Connect**.
-- In **App Store Connect**: create the app record, add screenshots, description, and
-  submit for review.
+### Full App Store release (optional, later)
+From the same archive: **Distribute App → App Store Connect**, fill in the store listing
+(screenshots, description, privacy answers) in App Store Connect, and **Submit for Review**.
 
 ## iOS notes
 - **Gyro permission:** handled by the DRIVE tap (`DeviceOrientationEvent.requestPermission`),

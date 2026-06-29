@@ -4,6 +4,7 @@
 const CACHE = 'cooldrive-v1';
 const CORE = [
   './', './index.html', './manifest.webmanifest', './icon.svg',
+  './icon-192.png', './icon-512.png', './icon-180.png',
   './vendor/es-module-shims.js',
   './vendor/three/build/three.module.min.js',
   './vendor/three/examples/jsm/loaders/GLTFLoader.js',

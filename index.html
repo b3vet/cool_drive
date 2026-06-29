@@ -10,8 +10,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="CoolDrive" />
-<link rel="icon" href="./icon.svg" type="image/svg+xml" />
-<link rel="apple-touch-icon" href="./icon.svg" />
+<link rel="icon" type="image/png" href="./icon-192.png" />
+<link rel="apple-touch-icon" href="./icon-180.png" />
 <style>
   :root {
     --fg: #f4f7ff;
@@ -350,7 +350,10 @@
 
 <script type="module" src="./src/main.js"></script>
 <script>
-  if ('serviceWorker' in navigator) {
+  // register the service worker on the WEB (PWA), but skip it inside the native
+  // Capacitor app — there it loads local files and a SW would only risk stale caches.
+  var __isNative = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+  if ('serviceWorker' in navigator && !__isNative) {
     window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
   }
 </script>

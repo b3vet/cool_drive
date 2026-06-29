@@ -389,12 +389,14 @@ function frame(now) {
 window.__game = { carState, scoring, PHYS, input, world, ach, audio, start: startGame, reset: resetCar };
 
 buildStartUI();
-if (isMobile && !window.isSecureContext) { const w = el('secureWarn'); if (w) w.style.display = 'block'; }
-// iOS Safari can't fully hide its chrome in a tab — prompt Add to Home Screen for fullscreen
+// these hints are Safari/web-only — never show them inside the native (Capacitor) app
+const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+if (!isNative && isMobile && !window.isSecureContext) { const w = el('secureWarn'); if (w) w.style.display = 'block'; }
+// iOS Safari can't fully hide its chrome in a tab — prompt Add to Home Screen for fullscreen (web only)
 const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
-const standalone = window.navigator.standalone === true ||
+const standalone = isNative || window.navigator.standalone === true ||
   (window.matchMedia && (window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches));
-if (isMobile && isIOS && !standalone) { const w = el('a2hsHint'); if (w) w.style.display = 'block'; }
+if (!isNative && isMobile && isIOS && !standalone) { const w = el('a2hsHint'); if (w) w.style.display = 'block'; }
 applyTuning();
 hud.renderAchievements(ach.progress());
 el('presetName').textContent = ctx.preset.name;
