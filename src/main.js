@@ -159,13 +159,13 @@ let acc = 0;
 
 function startGame() {
   if (running) return;
+  audio.start(); // unlock/resume audio FIRST — before the gyro-permission dialog can interfere
   if (isMobile && !input.isMotionActive()) input.enableMotion(); // gesture-gated on iOS
   running = true;
   document.body.classList.add('playing'); // triggers the one-time zone-hint fade
   el('startScreen').classList.add('hidden');
   applyTuning();
   ach.event('car', CARS[selectedCarIndex].id);
-  audio.start();
   clock.start();
   clock.getDelta();
 }
@@ -283,6 +283,12 @@ el('recenterBtn').addEventListener('click', () => { input.recenterTilt(); audio.
 window.addEventListener('keydown', startGame, { once: false });
 el('startScreen').addEventListener('click', startGame);
 el('btnStart').addEventListener('click', (e) => { e.stopPropagation(); startGame(); });
+// Resume/unlock the WebAudio context on the VERY FIRST raw gesture (capture phase,
+// before startGame's gyro-permission dialog) so car SFX start on the first tap on
+// mobile — not only after the radio is toggled.
+const unlockAudio = () => audio.start();
+['pointerdown', 'touchstart', 'mousedown'].forEach((ev) =>
+  window.addEventListener(ev, unlockAudio, { capture: true, passive: true, once: true }));
 // ---- layout / orientation --------------------------------------------------
 // On a PORTRAIT mobile browser, rotate the whole game 90° to landscape so it
 // fills the roomy portrait viewport (slowroads-style) — no forced landscape, no

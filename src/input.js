@@ -93,8 +93,9 @@ export function createInput() {
     return { x: cx, y: cy, W: rvw, H: rvh };
   }
   function zoneOf(gx, gy, W, H) {
-    if (gy > H * 0.8) return 'handbrake'; // bottom strip
-    return gx < W * 0.5 ? 'brake' : 'gas'; // left = brake, right = gas
+    // handbrake: a CENTRE-BOTTOM box; brake/gas fill their full height otherwise
+    if (gy > H * 0.72 && gx > W * 0.34 && gx < W * 0.66) return 'handbrake';
+    return gx < W * 0.5 ? 'brake' : 'gas'; // left = brake, right = gas (full height)
   }
   // Recompute every driving control from the FULL set of active touches on each
   // event. Reading window-level `e.touches` (not per-element changedTouches) makes

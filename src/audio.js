@@ -25,6 +25,7 @@ export function createAudio() {
   let ctx = null;
   let master, sfxBus, musicBus;
   let started = false;
+  let unlockedOnce = false;
   let muted = false;
   let masterVol = 0.8;
   let musicVol = 0.5;
@@ -293,6 +294,17 @@ export function createAudio() {
     if (!ensure()) return;
     if (ctx.state === 'suspended') ctx.resume();
     if (!started) { buildContinuous(); started = true; }
+    // iOS unlock: play a 1-frame silent buffer INSIDE the user gesture so audio
+    // output actually starts on the first tap (not only once the radio is toggled).
+    if (!unlockedOnce) {
+      try {
+        const b = ctx.createBufferSource();
+        b.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+        b.connect(ctx.destination);
+        b.start(0);
+      } catch (e) {}
+      unlockedOnce = true;
+    }
   }
   function setMuted(m) {
     muted = m;

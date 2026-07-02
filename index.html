@@ -122,7 +122,8 @@
   #radioPower.on { background: var(--accent); color: #06120e; }
   #radioName { min-width: 92px; font-family: var(--disp); font-weight: 600; font-size: 11px; letter-spacing: .06em; opacity: .9; }
   #radioName .eq { color: var(--accent); }
-  body.mobile #radio { left: 14px; bottom: 12px; transform: none; padding: 6px 9px; }
+  /* mobile: radio ↔ boost swap — radio moves to top-centre, boost to bottom-left */
+  body.mobile #radio { left: 50%; right: auto; top: 12px; bottom: auto; transform: translateX(-50%); margin-left: 0; padding: 6px 9px; }
 
   #hint { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); font-family: var(--disp); font-size: 11px; opacity: .4; font-weight: 600; letter-spacing: .04em; text-align: center; pointer-events: none; }
   body.mobile #hint { display: none; }
@@ -208,10 +209,11 @@
   .zoneBg, .zoneHint { position: absolute; opacity: 0; pointer-events: none; }
   body.mobile.playing .zoneBg, body.mobile.playing .zoneHint { animation: zoneFade 9s ease forwards; }
   @keyframes zoneFade { 0% { opacity: 0 } 6% { opacity: 1 } 72% { opacity: 1 } 100% { opacity: 0 } }
-  .zoneBg { top: 0; height: 80%; }
-  .zb-brake { left: 0; width: 50%; background: linear-gradient(90deg, rgba(255,90,77,.22), transparent 80%); border-right: 1px dashed rgba(255,255,255,.12); }
-  .zb-gas { right: 0; width: 50%; background: linear-gradient(270deg, var(--accent-soft), transparent 80%); }
-  .zb-hand { left: 0; right: 0; top: auto; bottom: 0; height: 20%; width: 100%; background: linear-gradient(0deg, rgba(74,214,255,.24), transparent 90%); border-top: 1px dashed rgba(255,255,255,.16); }
+  .zoneBg { top: 0; height: 100%; }
+  .zb-brake { left: 0; width: 50%; height: 100%; background: linear-gradient(90deg, rgba(255,90,77,.20), transparent 78%); border-right: 1px dashed rgba(255,255,255,.12); }
+  .zb-gas { right: 0; width: 50%; height: 100%; background: linear-gradient(270deg, var(--accent-soft), transparent 78%); }
+  /* handbrake is a CENTRE-BOTTOM box (brake/gas run full height either side of it) */
+  .zb-hand { left: 34%; width: 32%; top: auto; bottom: 0; height: 28%; background: linear-gradient(0deg, rgba(74,214,255,.30), transparent 92%); border-top: 1px dashed rgba(255,255,255,.2); border-left: 1px dashed rgba(255,255,255,.14); border-right: 1px dashed rgba(255,255,255,.14); }
   .zoneHint { font-family: var(--disp); font-weight: 700; letter-spacing: .12em; font-size: 15px; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,.6); white-space: nowrap; text-align: center; line-height: 1.3; }
   .zh-steer { top: 10%; left: 50%; transform: translateX(-50%); color: var(--accent); text-shadow: 0 0 14px var(--accent); }
   .zh-brake { left: 9%; top: 42%; transform: translateY(-50%); color: #ff8a80; }
@@ -236,8 +238,9 @@
   body.mobile #celebrate .sub { font-size: 13px; }
 
   #btnBoostM { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 8; display: none; align-items: center; gap: 6px; padding: 10px 20px; clip-path: var(--facet-sm); background: rgba(255,178,58,.2); box-shadow: inset 0 0 0 1px rgba(255,178,58,.55); color: #fff; font-family: var(--disp); font-weight: 700; font-size: 13px; letter-spacing: .08em; pointer-events: auto; touch-action: none; }
-  body.mobile #btnBoostM { display: inline-flex; }
+  body.mobile #btnBoostM { display: inline-flex; left: 14px; right: auto; top: auto; bottom: 14px; transform: none; }
   #btnBoostM.active { filter: brightness(1.4); transform: translateX(-50%) scale(.94); }
+  body.mobile #btnBoostM.active { transform: scale(.94); }
   #btnBoostM span { font-size: 11px; opacity: .85; }
 
   /* (removed the portrait "rotate your device" wall — portrait now renders the
@@ -251,10 +254,10 @@
   .ctrlGuide { display: none; margin-top: 16px; }
   body.mobile .ctrlGuide { display: block; }
   .cg-screen { position: relative; width: 240px; height: 122px; clip-path: var(--facet); box-shadow: inset 0 0 0 1.5px var(--line); overflow: hidden; font-family: var(--disp); font-weight: 700; font-size: 13px; letter-spacing: .08em; }
-  .cg-half { position: absolute; top: 0; height: 74%; width: 50%; display: grid; place-items: center; }
+  .cg-half { position: absolute; top: 0; height: 100%; width: 50%; display: grid; place-items: center; align-content: start; padding-top: 26%; }
   .cg-brake { left: 0; background: rgba(255,90,77,.2); color: #ff8a80; border-right: 1px dashed rgba(255,255,255,.2); }
   .cg-gas { right: 0; background: var(--accent-soft); color: #7cf0c8; }
-  .cg-hand { position: absolute; bottom: 0; left: 0; right: 0; height: 26%; display: grid; place-items: center; background: rgba(74,214,255,.2); color: #8fd9ff; font-size: 11px; }
+  .cg-hand { position: absolute; bottom: 0; left: 34%; right: 34%; height: 34%; display: grid; place-items: center; background: rgba(74,214,255,.24); border: 1px dashed rgba(255,255,255,.24); border-bottom: none; color: #8fd9ff; font-size: 11px; }
   .cg-steer { position: absolute; top: 8px; left: 0; right: 0; z-index: 1; text-align: center; color: var(--accent); font-size: 11px; }
   .cg-cap { margin-top: 10px; font-size: 12px; color: var(--muted); }
 
