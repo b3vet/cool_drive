@@ -293,7 +293,21 @@ function unlockAudio() {
   audio.start();
   if (audio.isRunning()) UNLOCK_EVENTS.forEach((ev) => window.removeEventListener(ev, unlockAudio, true));
 }
-UNLOCK_EVENTS.forEach((ev) => window.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
+function armUnlock() {
+  // re-adding an identical listener is a no-op, so this is safe to call repeatedly
+  UNLOCK_EVENTS.forEach((ev) => window.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
+}
+armUnlock();
+// iOS suspends ('interrupted') the context and pauses media on calls/Siri/lock/
+// backgrounding and never revives them itself. On return to foreground: try to
+// resume directly, and if that needs a user gesture, re-arm the tap unlock.
+function reviveAudio() {
+  if (document.visibilityState !== 'visible') return;
+  audio.start();
+  if (!audio.isRunning()) armUnlock();
+}
+document.addEventListener('visibilitychange', reviveAudio);
+window.addEventListener('pageshow', reviveAudio);
 // ---- layout / orientation --------------------------------------------------
 // On a PORTRAIT mobile browser, rotate the whole game 90° to landscape so it
 // fills the roomy portrait viewport (slowroads-style) — no forced landscape, no

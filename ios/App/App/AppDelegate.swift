@@ -1,13 +1,26 @@
 import UIKit
 import Capacitor
+import AVFoundation
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
 
+    // Game audio must ignore the ring/silent switch: the default "ambient" session
+    // mutes Web Audio (engine/SFX) whenever the switch is on, unless an <audio>
+    // element happens to be playing (why sound "needed the radio"). ".playback"
+    // pins the session. ".mixWithOthers" keeps the player's own Spotify/Music
+    // running under the synth SFX — note WebKit takes a non-mixable session if the
+    // in-game RADIO (real <audio> media) is played, which pauses their music; the
+    // web keep-alive hack is disabled in the native app for exactly that reason.
+    private func pinAudioSession() {
+        try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
+        try? AVAudioSession.sharedInstance().setActive(true)
+    }
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        pinAudioSession()
         return true
     }
 
@@ -26,7 +39,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        // Re-assert the audio session — an interruption (call/Siri) or another app
+        // taking the session can deactivate ours; without this the ring switch
+        // would mute the game again after every interruption.
+        pinAudioSession()
     }
 
     func applicationWillTerminate(_ application: UIApplication) {

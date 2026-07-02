@@ -37,11 +37,43 @@ export function createAudio() {
   // radio
   let stationIndex = 0;
   let radioOn = false;
-  let audioEl = null;
+  let plainEl = null; // direct-output <audio> — cross-origin URLs work with NO CORS setup
+  let routedEl = null; // <audio> routed through musicBus — music slider works on iOS
+  let activeEl = null; // whichever of the two the current track plays on
   let gen = null; // generative scheduler state
   let onRadioError = null; // (stationName) => void — surfaced to the UI
   let playlist = []; // current station's track URLs
   let trackIndex = 0;
+
+  // ---- iOS ring/silent-switch bypass ---------------------------------------
+  // On iOS the mute switch silences Web Audio (engine/skid/SFX) but NOT <audio>
+  // media playback — and while ANY media element is playing, the whole session
+  // becomes "playback" and Web Audio is audible again. That's why sound only
+  // worked with the radio on. Keeping a looping SILENT <audio> playing pins the
+  // session to playback mode so the game is audible regardless of the switch.
+  const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1); // iPadOS reports as Mac
+  // In the NATIVE app the AVAudioSession is pinned to .playback in AppDelegate, so
+  // the keep-alive is unnecessary — and playing it would make WebKit grab a
+  // non-mixable session that pauses the user's own Spotify/Music.
+  const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  const SILENCE = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+  let keepAlive = null;
+  function ensureKeepAlive() {
+    if (!IOS || NATIVE) return;
+    if (!keepAlive) {
+      keepAlive = new Audio(SILENCE);
+      keepAlive.loop = true;
+      keepAlive.setAttribute('playsinline', '');
+      keepAlive.preload = 'auto';
+      // iOS pauses it on interruptions (calls, Siri, lock, backgrounding) and never
+      // resumes it itself — without this the mute-switch bug would return mid-session.
+      keepAlive.addEventListener('pause', () => {
+        if (document.visibilityState === 'visible') keepAlive.play().catch(() => {});
+      });
+    }
+    if (keepAlive.paused) keepAlive.play().catch(() => {});
+  }
 
   function ensure() {
     if (ctx) return true;
@@ -226,30 +258,49 @@ export function createAudio() {
   }
 
   // ---- radio control -------------------------------------------------------
-  function ensureAudioEl() {
-    if (audioEl) return;
-    audioEl = new Audio();
-    // Deliberately NOT setting crossOrigin and NOT routing through Web Audio:
-    // plain <audio> playback works from ANY host with no CORS headers, so your
-    // MP3s can live on a CDN / object storage / the VPS without extra config.
-    audioEl.addEventListener('error', () => {
+  // Two players, picked per-track by origin:
+  //  • routedEl — through musicBus (Web Audio). Same-origin files only. The music
+  //    slider works on iOS this way (element .volume is READ-ONLY there).
+  //  • plainEl  — direct output, NOT routed: works for cross-origin URLs / streams
+  //    with no CORS headers (a routed cross-origin element would play silence).
+  function makeRadioEl(routed) {
+    const el = new Audio();
+    el.setAttribute('playsinline', '');
+    el.addEventListener('error', () => {
+      if (activeEl !== el) return;
       radioOn = false;
       if (onRadioError) onRadioError(RADIO_STATIONS[stationIndex].name);
     });
     // playlist stations: advance to the next track when one finishes (wrap around)
-    audioEl.addEventListener('ended', () => {
-      if (!radioOn || playlist.length <= 1) return;
+    el.addEventListener('ended', () => {
+      if (activeEl !== el || !radioOn || playlist.length <= 1) return;
       trackIndex = (trackIndex + 1) % playlist.length;
       playCurrentTrack();
     });
+    if (routed) {
+      try { ctx.createMediaElementSource(el).connect(musicBus); } catch (e) {}
+    }
+    return el;
   }
   function playCurrentTrack() {
     const st = RADIO_STATIONS[stationIndex];
-    audioEl.src = playlist[trackIndex];
-    audioEl.loop = playlist.length === 1 && !st.stream; // single song loops; playlists advance
-    audioEl.muted = muted; // .muted is the iOS-reliable mute (volume is read-only there)
-    audioEl.volume = muted ? 0 : musicVol;
-    audioEl.play().catch(() => {
+    const url = playlist[trackIndex];
+    let sameOrigin = true;
+    try { sameOrigin = new URL(url, location.href).origin === location.origin; } catch (e) {}
+    const el = sameOrigin
+      ? (routedEl || (routedEl = makeRadioEl(true)))
+      : (plainEl || (plainEl = makeRadioEl(false)));
+    if (activeEl && activeEl !== el) activeEl.pause();
+    activeEl = el;
+    el.src = url;
+    el.loop = playlist.length === 1 && !st.stream; // single song loops; playlists advance
+    el.muted = muted; // .muted is the iOS-reliable mute (volume is read-only there)
+    // routed: loudness comes from musicBus gain; plain: element volume (desktop only)
+    el.volume = sameOrigin ? 1 : muted ? 0 : musicVol;
+    el.play().catch((err) => {
+      // an interrupted play() (paused / src swapped by a station change) is a
+      // supersede, not a broken station — only real failures kill the radio
+      if (activeEl !== el || (err && err.name === 'AbortError')) return;
       radioOn = false;
       if (onRadioError) onRadioError(st.name);
     });
@@ -260,11 +311,10 @@ export function createAudio() {
     stationIndex = ((i % n) + n) % n;
     const st = RADIO_STATIONS[stationIndex];
     stopGenerative();
-    if (audioEl) audioEl.pause();
+    if (activeEl) { activeEl.pause(); activeEl = null; } // deliberate stop — stale play()/error events must not kill the radio
     if (st.generative) {
       startGenerative();
     } else {
-      ensureAudioEl();
       // a station can be { url } (one song) or { tracks: [...] } (a playlist)
       playlist = st.tracks ? st.tracks.slice() : st.url ? [st.url] : [];
       trackIndex = 0;
@@ -277,7 +327,7 @@ export function createAudio() {
     if (!ensure()) return false;
     if (radioOn) {
       stopGenerative();
-      if (audioEl) audioEl.pause();
+      if (activeEl) { activeEl.pause(); activeEl = null; }
       radioOn = false;
     } else {
       playStation(stationIndex);
@@ -297,8 +347,11 @@ export function createAudio() {
     // So resume on EVERY gesture until it's actually running (main.js fires this on
     // pointerdown/touchend/click), playing a 1-frame silent buffer as the classic
     // iOS output-unlock nudge each time it's still suspended.
-    if (ctx.state === 'suspended') {
-      ctx.resume();
+    // NOT 'running' covers both 'suspended' AND iOS's non-standard 'interrupted'
+    // state (after calls/Siri) — an interrupted context needs an explicit resume too.
+    if (ctx.state !== 'running') {
+      const p = ctx.resume();
+      if (p && p.catch) p.catch(() => {}); // outside-gesture resume may be denied — the armed tap unlock retries
       try {
         const b = ctx.createBufferSource();
         b.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
@@ -306,21 +359,24 @@ export function createAudio() {
         b.start(0);
       } catch (e) {}
     }
+    ensureKeepAlive(); // iOS web: pin the session to "playback" so the mute switch can't silence us
+    // an interruption pauses the radio element without flipping radioOn — resync
+    if (radioOn && activeEl && activeEl.paused) activeEl.play().catch(() => {});
     if (!started) { buildContinuous(); started = true; }
   }
   const isRunning = () => !!ctx && ctx.state === 'running';
   function setMuted(m) {
     muted = m;
     if (master) master.gain.setTargetAtTime(m ? 0 : masterVol, ctx.currentTime, 0.05);
-    // The URL radio plays through a plain <audio> (off the Web Audio master bus).
     // On iOS `.volume` is read-only (hardware-controlled), so `.muted` is what
-    // actually silences it — set both for cross-platform coverage.
-    if (audioEl) { audioEl.muted = m; audioEl.volume = m ? 0 : musicVol; }
+    // actually silences the media elements — set both for cross-platform coverage.
+    if (routedEl) routedEl.muted = m;
+    if (plainEl) { plainEl.muted = m; plainEl.volume = m ? 0 : musicVol; }
   }
   function setMusicVol(v) {
     musicVol = v;
-    if (musicBus) musicBus.gain.setTargetAtTime(v, ctx.currentTime, 0.05);
-    if (audioEl) audioEl.volume = muted ? 0 : v;
+    if (musicBus) musicBus.gain.setTargetAtTime(v, ctx.currentTime, 0.05); // routedEl + generative
+    if (plainEl) plainEl.volume = muted ? 0 : v; // cross-origin element (desktop only; iOS read-only)
   }
   function setSfxVol(v) {
     sfxVol = v;
@@ -334,5 +390,14 @@ export function createAudio() {
     setMuted, toggleMute, setMusicVol, setSfxVol,
     setOnRadioError(fn) { onRadioError = fn; },
     get muted() { return muted; },
+    // debug snapshot for on-device diagnosis (window.__game.audio.state)
+    get state() {
+      return {
+        ctx: ctx ? ctx.state : 'none',
+        keepAlive: !!keepAlive && !keepAlive.paused,
+        radio: radioOn ? (gen ? 'generative' : activeEl === routedEl ? 'routed' : 'plain') : 'off',
+        muted,
+      };
+    },
   };
 }
