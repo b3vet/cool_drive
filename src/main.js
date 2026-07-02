@@ -20,6 +20,16 @@ import { createAchievements } from './achievements.js';
 
 const el = (id) => document.getElementById(id);
 const hex = (c) => '#' + c.toString(16).padStart(6, '0');
+// drive the CSS accent (+ derived tints) from the active time-of-day neon so the
+// whole UI recolours with the sky (golden → dawn → night). See DESIGN.md.
+function setAccent(hexNum) {
+  const r = (hexNum >> 16) & 255, g = (hexNum >> 8) & 255, b = hexNum & 255;
+  const s = document.documentElement.style;
+  s.setProperty('--accent', `rgb(${r},${g},${b})`);
+  s.setProperty('--accent-soft', `rgba(${r},${g},${b},0.13)`);
+  s.setProperty('--accent-dim', `rgba(${r},${g},${b},0.42)`);
+  s.setProperty('--accent-glow', `rgba(${r},${g},${b},0.5)`);
+}
 const darken = (c) => {
   const r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
   return hex(((r * 0.45) << 16) | ((g * 0.45) << 8) | (b * 0.45));
@@ -175,6 +185,7 @@ function cyclePreset() {
   const key = presetOrder[presetIdx];
   const p = applyPreset(ctx, renderer, key);
   applyWorldPreset(world, p);
+  setAccent(p.neon);
   el('presetName').textContent = p.name;
   if (key === 'night') ach.event('night');
   audio.sfx.ui();
@@ -433,6 +444,7 @@ if (!isNative && isMobile && !window.isSecureContext) { const w = el('secureWarn
 // landscape and fills the screen, so we don't nag about fullscreen.)
 applyLayout();
 applyTuning();
+setAccent(ctx.preset.neon); // initial accent from the starting preset
 hud.renderAchievements(ach.progress());
 el('presetName').textContent = ctx.preset.name;
 frame();

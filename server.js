@@ -25,6 +25,8 @@ const MIME = {
   '.ogg': 'audio/ogg',
   '.wav': 'audio/wav',
   '.m4a': 'audio/mp4',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
   '.webmanifest': 'application/manifest+json',
 };
 
