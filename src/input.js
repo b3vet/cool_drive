@@ -27,7 +27,6 @@ export function createInput() {
 
   // ---- mobile touch state ---------------------------------------------------
   const touch = { throttle: false, brake: false, handbrake: false, boost: false };
-  const touchZones = new Map(); // touch identifier -> zone string
 
   // ---- gyroscope ------------------------------------------------------------
   let motionActive = false;
@@ -83,9 +82,23 @@ export function createInput() {
     if (y > H * 0.8) return 'handbrake'; // bottom strip
     return x < W * 0.5 ? 'brake' : 'gas'; // left = brake, right = gas
   }
-  function recomputeZones() {
-    let g = false, b = false, h = false;
-    for (const z of touchZones.values()) {
+  // Recompute every driving control from the FULL set of active touches on each
+  // event. Reading window-level `e.touches` (not per-element changedTouches) makes
+  // multitouch reliable in a WKWebView, where the 2nd finger's events can be
+  // captured by whatever element it lands on instead of the touch layer. Each
+  // touch is classified by what's under it, so menu/gear taps still work and
+  // gas + handbrake (+ boost) hold simultaneously.
+  const TAP_CONTROLS = '#gearBtn, #camBtn, #radio, #settings, #startScreen';
+  let boostBtnEl = null;
+  function recomputeTouches(list) {
+    let g = false, b = false, h = false, bo = false;
+    for (const t of list) {
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      if (el && el.closest) {
+        if (el.closest('#btnBoostM')) { bo = true; continue; } // boost button (a held control)
+        if (el.closest(TAP_CONTROLS)) continue; // menu/gear/radio — not a driving control
+      }
+      const z = zoneOf(t.clientX, t.clientY);
       if (z === 'gas') g = true;
       else if (z === 'brake') b = true;
       else if (z === 'handbrake') h = true;
@@ -93,27 +106,17 @@ export function createInput() {
     touch.throttle = g;
     touch.brake = b;
     touch.handbrake = h;
+    touch.boost = bo;
+    if (!boostBtnEl) boostBtnEl = document.getElementById('btnBoostM');
+    if (boostBtnEl) boostBtnEl.classList.toggle('active', bo);
   }
-  function bindZones(layer) {
-    if (!layer) return;
-    const start = (e) => {
-      for (const t of e.changedTouches) touchZones.set(t.identifier, zoneOf(t.clientX, t.clientY));
-      recomputeZones();
-      e.preventDefault();
-    };
-    const move = (e) => {
-      for (const t of e.changedTouches) if (touchZones.has(t.identifier)) touchZones.set(t.identifier, zoneOf(t.clientX, t.clientY));
-      recomputeZones();
-      e.preventDefault();
-    };
-    const end = (e) => {
-      for (const t of e.changedTouches) touchZones.delete(t.identifier);
-      recomputeZones();
-    };
-    layer.addEventListener('touchstart', start, { passive: false });
-    layer.addEventListener('touchmove', move, { passive: false });
-    layer.addEventListener('touchend', end);
-    layer.addEventListener('touchcancel', end);
+  function bindZones() {
+    const onTouch = (e) => recomputeTouches(e.touches);
+    // passive: no preventDefault needed — body has touch-action:none + user-scalable=no
+    window.addEventListener('touchstart', onTouch, { passive: true });
+    window.addEventListener('touchmove', onTouch, { passive: true });
+    window.addEventListener('touchend', onTouch, { passive: true });
+    window.addEventListener('touchcancel', onTouch, { passive: true });
   }
 
   // held button (boost on mobile); also works with mouse for testing

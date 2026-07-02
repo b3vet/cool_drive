@@ -8,7 +8,8 @@
     "dev": "node server.js",
     "build:web": "node scripts/build-www.mjs",
     "ios": "npm run build:web && npx cap sync ios && npx cap open ios",
-    "ios:sync": "npm run build:web && npx cap sync ios"
+    "ios:sync": "npm run build:web && npx cap sync ios",
+    "bump": "node scripts/bump-build.mjs"
   },
   "license": "MIT",
   "dependencies": {

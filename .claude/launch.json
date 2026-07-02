@@ -4,8 +4,8 @@
     {
       "name": "cooldrive",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["server.js", "5173"],
-      "port": 5173
+      "runtimeArgs": ["server.js"],
+      "autoPort": true
     }
   ]
 }

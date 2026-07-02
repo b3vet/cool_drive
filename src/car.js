@@ -14,6 +14,11 @@ import { CAR_COLORS, PHYS, VIS } from './config.js';
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
+// Cache-buster for car models. The dev server / CDN caches .glb for a week, so bump
+// this whenever a model file in /models changes to force clients to refetch it.
+const MODEL_VER = '4';
+const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'v=' + MODEL_VER;
+
 // Load a .glb/.gltf model as the car body. Auto-centres, scales to bodyL, and
 // orients with def.modelRotation. Used when a car def has a `modelUrl`.
 function buildGLBCar(def) {
@@ -22,24 +27,54 @@ function buildGLBCar(def) {
   const chassis = new THREE.Group();
   car.add(chassis);
 
+  // Wheel wiring — filled in async once the model loads (see rigGLBWheels). These
+  // arrays are returned by reference so applyCarVisual animates the wheels the frame
+  // they appear. GLB wheels live on the CAR ROOT (not the chassis) so they stay
+  // planted on the ground while the body rolls/pitches.
+  const steerGroups = [];
+  const frontSpinners = [];
+  const rearSpinners = [];
+
   new GLTFLoader().load(
-    def.modelUrl,
+    bust(def.modelUrl),
     (gltf) => {
       const model = gltf.scene;
-      const box = new THREE.Box3().setFromObject(model);
+      // Orient first (game forward = -Z), so scale + recentre are measured from the
+      // ACTUAL on-screen pose — otherwise a rotated model sits off its pivot.
+      model.rotation.y = def.modelRotation || 0;
+      model.updateMatrixWorld(true);
       const size = new THREE.Vector3();
-      const center = new THREE.Vector3();
-      box.getSize(size);
-      box.getCenter(center);
+      new THREE.Box3().setFromObject(model).getSize(size);
       const targetLen = def.bodyL || 4.0;
       const longest = Math.max(size.x, size.z) || 1;
       const scale = def.modelScale || targetLen / longest;
       model.scale.setScalar(scale);
-      // sit it on the ground, centred horizontally
-      model.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
-      model.rotation.y = def.modelRotation || 0;
-      model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; } });
+      // measure the scaled+rotated box, then centre horizontally + drop onto ground.
+      // `modelLift` raises the body above the ground (ride height) — the wheels stay
+      // planted, so it opens up ground clearance under the arches.
+      model.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(model);
+      const center = new THREE.Vector3();
+      box.getCenter(center);
+      model.position.set(-center.x, -box.min.y + (def.modelLift || 0), -center.z);
+      model.updateMatrixWorld(true);
+      // Flat shading (faceted, per-face normals) to match the game's low-poly look —
+      // the AI models come out smooth/soft otherwise. Disable with `flatShading: false`.
+      const flat = def.flatShading !== false;
+      model.traverse((o) => {
+        if (!o.isMesh) return;
+        o.castShadow = true; o.receiveShadow = false;
+        if (flat) {
+          const mats = Array.isArray(o.material) ? o.material : [o.material];
+          mats.forEach((m) => { if (m) { m.flatShading = true; m.needsUpdate = true; } });
+        }
+      });
       chassis.add(model);
+
+      // Tripo models bake the wheels into one merged, fragmented shell (they can't be
+      // spun individually), so we add real spinning/steering wheels at the detected
+      // hub positions. Disable per-car with `wheels: false`.
+      if (def.wheels !== false) rigGLBWheels(def, car, model);
     },
     undefined,
     (err) => console.warn('CoolDrive: failed to load car model', def.modelUrl, err)
@@ -53,11 +88,62 @@ function buildGLBCar(def) {
   const wbR = PHYS.wheelbase / 2 + 0.3;
   return {
     def, group: car, chassis, bodyMat: null,
-    steerGroups: [], frontSpinners: [], rearSpinners: [], tails: [],
+    steerGroups, frontSpinners, rearSpinners, tails: [],
     tlMat: new THREE.MeshBasicMaterial(), // dummy so the brake-light wiring is harmless
     cameraGoal, lookTarget, frontAngle: 0, rearAngle: 0, prevFwd: 0,
     rearOffsets: [new THREE.Vector3(-hw, 0, wbR), new THREE.Vector3(hw, 0, wbR)],
   };
+
+  // --- helpers (closures over car's wheel arrays) ------------------------------
+
+  // Add four spinning/steering wheels into the (wheel-less) GLB body's arches.
+  // Placed SYMMETRICALLY from the model's bounding box — the bodies are generated
+  // without tyres, so there's nothing to detect; instead we use the footprint plus
+  // per-car fractions (tunable in config: wheelTrack, wheelBase, wheelSize, wheelHubY).
+  function rigGLBWheels(def, car, model) {
+    let mesh = null;
+    model.traverse((o) => { if (o.isMesh && !mesh) mesh = o; });
+    if (!mesh) return;
+    const pos = mesh.geometry.attributes.position;
+    // local geometry bbox
+    let mnx = 1e9, mny = 1e9, mnz = 1e9, mxx = -1e9, mxy = -1e9, mxz = -1e9;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      if (x < mnx) mnx = x; if (y < mny) mny = y; if (z < mnz) mnz = z;
+      if (x > mxx) mxx = x; if (y > mxy) mxy = y; if (z > mxz) mxz = z;
+    }
+    // transform the 8 corners by model.matrix -> car-LOCAL AABB (chassis is identity
+    // at build, so model.matrix maps model-local -> car-root; setFromObject would give
+    // WORLD space, which is wrong once the car is already at its spawn position)
+    model.updateMatrix();
+    const m = model.matrix, p = new THREE.Vector3();
+    let cx0 = 1e9, cz0 = 1e9, cx1 = -1e9, cz1 = -1e9;
+    for (const X of [mnx, mxx]) for (const Y of [mny, mxy]) for (const Z of [mnz, mxz]) {
+      p.set(X, Y, Z).applyMatrix4(m);
+      if (p.x < cx0) cx0 = p.x; if (p.x > cx1) cx1 = p.x;
+      if (p.z < cz0) cz0 = p.z; if (p.z > cz1) cz1 = p.z;
+    }
+    const ctrX = (cx0 + cx1) / 2, ctrZ = (cz0 + cz1) / 2, halfX = (cx1 - cx0) / 2, halfZ = (cz1 - cz0) / 2;
+    const r = def.wheelSize || def.wheel || 0.42;    // wheel radius (game units)
+    const track = (def.wheelTrack ?? 0.80) * halfX;  // left/right offset from centre
+    const base = (def.wheelBase ?? 0.66) * halfZ;    // front/rear offset from centre
+    const hubY = def.wheelHubY ?? r;                 // hub height (sits r above ground)
+    const shiftZ = def.wheelOffsetZ || 0;            // shift ALL wheels along Z (+ = toward the rear)
+    // forward is -Z, so front wheels are at -base
+    const spec = [
+      { x: track, z: -base, front: true }, { x: -track, z: -base, front: true },
+      { x: track, z: base, front: false }, { x: -track, z: base, front: false },
+    ];
+    for (const w of spec) {
+      const spinner = makeWheel(r);
+      const anchor = new THREE.Group();
+      anchor.position.set(ctrX + w.x, hubY, ctrZ + w.z + shiftZ);
+      anchor.add(spinner);
+      car.add(anchor); // ROOT — does not roll with the body
+      if (w.front) { steerGroups.push(anchor); frontSpinners.push(spinner); }
+      else rearSpinners.push(spinner);
+    }
+  }
 }
 
 function mat(color, opts = {}) {

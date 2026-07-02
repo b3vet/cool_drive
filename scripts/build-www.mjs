@@ -7,9 +7,12 @@ const items = ['index.html', 'manifest.webmanifest', 'sw.js', 'icon.svg', 'icon-
 
 await rm(dst, { recursive: true, force: true });
 await mkdir(dst, { recursive: true });
+// Don't bundle the raw (pre-optimization) Tripo car models — they're huge and dev-only.
+const exclude = (src) => !/(^|\/)models\/_raw(\/|$)/.test(src);
+
 for (const f of items) {
   try {
-    await cp(f, `${dst}/${f}`, { recursive: true });
+    await cp(f, `${dst}/${f}`, { recursive: true, filter: exclude });
   } catch (e) {
     console.warn('skip (missing):', f);
   }

@@ -108,6 +108,13 @@ export const CARS = [
     cabinW: 1.5, cabinL: 1.9, cabinH: 0.5, cabinZ: -0.15,
     nose: 'tapered', wing: 'medium', scoop: false, wheel: 0.42,
     engineMul: 1.0, speedMul: 1.0, gripMul: 1.0,
+    modelUrl: './models/falcon_gt.glb', // Tripo P1 wheel-less body; front faces +X -> rotate to -Z
+    modelRotation: Math.PI / 2,
+    modelLift: 0.10,   // raise the body for a bit of ground clearance
+    // procedural wheels dropped into the (wheel-less) body's arches:
+    wheelSize: 0.30,   // wheel radius (game units)
+    wheelTrack: 0.78,  // L/R offset as fraction of body half-width
+    wheelBase: 0.59,   // F/R offset as fraction of body half-length
   },
   {
     id: 'viper',
@@ -119,6 +126,9 @@ export const CARS = [
     cabinW: 1.42, cabinL: 1.55, cabinH: 0.42, cabinZ: -0.32,
     nose: 'sharp', wing: 'big', scoop: false, wheel: 0.44,
     engineMul: 1.12, speedMul: 1.12, gripMul: 0.9,
+    modelUrl: './models/night_viper.glb', // Tripo P1 wheel-less body; front faces +X -> rotate to -Z
+    modelRotation: Math.PI / 2,
+    wheelSize: 0.32, wheelTrack: 0.79, wheelBase: 0.55, wheelOffsetZ: 0.20,
   },
   {
     id: 'brute',
@@ -130,14 +140,19 @@ export const CARS = [
     cabinW: 1.6, cabinL: 1.8, cabinH: 0.55, cabinZ: 0.05,
     nose: 'blunt', wing: 'none', scoop: true, wheel: 0.46,
     engineMul: 1.08, speedMul: 0.96, gripMul: 1.12,
+    modelUrl: './models/brute_v8.glb', // Tripo P1 wheel-less body; front faces +X -> rotate to -Z
+    modelRotation: Math.PI / 2,
+    wheelSize: 0.34, wheelTrack: 0.75, wheelBase: 0.58,
   },
 ];
 
 // ---- Visual feel (wheel spin, body roll/pitch) -----------------------------
 export const VIS = {
   launchSpin: 22, // extra wheel-spin (rad/s) at full throttle from low speed (burnout feel)
-  rollMax: 0.16, // max body roll into a turn/slide (rad ~9 deg)
-  pitchMax: 0.07, // max nose dive/squat under brake/accel (rad ~4 deg)
+  rollMax: 0.08, // max body roll into a turn/slide (rad ~4.5 deg) — kept low so the
+  // AI car bodies lean over their (now separate, ground-planted) wheels instead of
+  // heaving a rear corner off the ground
+  pitchMax: 0.06, // max nose dive/squat under brake/accel (rad ~3.5 deg)
   bodyLerp: 7, // how fast the chassis leans toward its target (1/s)
 };
 
@@ -163,16 +178,27 @@ export const CAM = {
   posDecay: 0.0016, // position lerp base (smaller = more lag/spring)
   lookDecay: 0.0009, // look-target lerp base (lags more than position)
   driftFrame: 2.6, // lateral camera offset while drifting (units)
+  minDist: 5.5, // never let the chase cam get closer than this (car reversing/bouncing into it)
+  // "Showcase" cam (C-key cycle / mobile 🎥) — a cinematic front-right 3/4 that
+  // follows the car, made to show off the car models. Car-local: forward is -Z.
+  showcaseAhead: 6.5, // how far in FRONT of the car (units)
+  showcaseSide: 4.5, // how far to the RIGHT of the car (units)
+  showcaseUp: 2.3, // camera height (units)
+  showcaseLook: 0.7, // height on the car the camera aims at (units)
+  showcaseFovBias: -4, // slightly tighter FOV for a cinematic feel
 };
 
 // ---- World -----------------------------------------------------------------
 export const WORLD = {
-  groundSize: 2400, // huge ground plane (fog hides the far edge)
-  boundary: 680, // soft circular boundary radius — gently turns you back, no crash
+  groundSize: 5200, // huge ground plane (fog hides the far edge) — scaled up with the map
+  boundary: 1400, // soft circular boundary radius — doubled+ for a much larger world
   roadWidth: 18, // drift-friendly road width (units)
   shadowRadius: 150, // sun-shadow frustum half-size; follows the car
   carRadius: 1.5, // car collision radius for hitting solid objects
-  hitRestitution: 0.35, // bounce off solid objects
+  hitRestitution: 0.35, // bounce off solid objects and walls
+  boundaryWallHeight: 26, // tall glowing ring wall at the world edge — fades in as you approach
+  wallHeight: 3.2, // drift-track wall height (visual)
+  wallThickness: 0.9, // drift-track wall collision thickness
 };
 
 // ---- Time-of-day visual presets -------------------------------------------
@@ -188,8 +214,8 @@ export const PRESETS = {
     hemiGround: 0x8a6a42,
     hemiIntensity: 0.85,
     fog: 0xf6b878,
-    fogNear: 130,
-    fogFar: 620,
+    fogNear: 150,
+    fogFar: 820,
     sunPos: [-60, 64, -30],
     groundColor: 0x4a4f60,
     neon: 0x33e0a1,
@@ -204,8 +230,8 @@ export const PRESETS = {
     hemiGround: 0x4a5260,
     hemiIntensity: 0.7,
     fog: 0xbcd0e8,
-    fogNear: 140,
-    fogFar: 640,
+    fogNear: 150,
+    fogFar: 860,
     sunPos: [50, 55, 30],
     groundColor: 0x40454f,
     neon: 0x4ad6ff,
@@ -220,11 +246,12 @@ export const PRESETS = {
     hemiGround: 0x14182c,
     hemiIntensity: 0.7,
     fog: 0x27407a,
-    fogNear: 100,
-    fogFar: 520,
+    fogNear: 120,
+    fogFar: 700,
     sunPos: [40, 70, -50],
     groundColor: 0x2c3252,
     neon: 0x44ffd6,
+    night: true, // trackside light poles switch on for this preset
   },
 };
 

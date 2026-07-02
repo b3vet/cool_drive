@@ -1,0 +1,132 @@
+<!doctype html>
+<!-- Dev-only GLB inspector. Not part of the game/build. Usage: model_viewer.html?model=./models/falcon_gt.glb -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GLB viewer</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1020;color:#cfe;font:13px system-ui}
+  #info{position:fixed;left:8px;top:8px;white-space:pre;z-index:2;text-shadow:0 1px 2px #000}
+  #angles{position:fixed;right:8px;top:8px;z-index:2}
+  button{background:#1b2440;color:#cfe;border:1px solid #345;border-radius:6px;padding:6px 10px;margin:2px;cursor:pointer}
+</style>
+<script async src="./vendor/es-module-shims.js"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three/build/three.module.min.js",
+  "three/addons/": "./vendor/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="info">loading…</div>
+<div id="angles">
+  <button onclick="__view.angle('front')">front</button>
+  <button onclick="__view.angle('back')">back</button>
+  <button onclick="__view.angle('left')">left</button>
+  <button onclick="__view.angle('right')">right</button>
+  <button onclick="__view.angle('top')">top</button>
+  <button onclick="__view.angle('hero')">hero</button>
+  <button onclick="__view.spin()">spin</button>
+  <button onclick="__view.wire()">wire</button>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const info = document.getElementById('info');
+const params = new URLSearchParams(location.search);
+const url = params.get('model') || './models/falcon_gt.glb';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1020);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.01, 1000);
+
+// studio-ish lighting
+scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x30343f, 1.0));
+const key = new THREE.DirectionalLight(0xffffff, 2.2);
+key.position.set(4, 8, 6); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048); scene.add(key);
+const fill = new THREE.DirectionalLight(0x99bbff, 0.8); fill.position.set(-6, 4, -4); scene.add(fill);
+
+// ground grid + axes; +X red, +Y green, +Z blue
+const grid = new THREE.GridHelper(10, 20, 0x445, 0x223); scene.add(grid);
+scene.add(new THREE.AxesHelper(2));
+// GAME FORWARD is -Z: draw a yellow arrow pointing -Z so we can see which way the car faces.
+scene.add(new THREE.ArrowHelper(new THREE.Vector3(0,0,-1), new THREE.Vector3(0,0.02,0), 3, 0xffe14a, 0.5, 0.3));
+
+let model = null, radius = 2, wireOn = false, spinning = false;
+const rotParam = parseFloat(params.get('rot') || '0') * Math.PI; // ?rot=0.5 -> PI/2
+
+function fit() {
+  // apply the game-forward rotation FIRST, then recentre from the rotated box
+  model.rotation.y = rotParam;
+  model.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(model);
+  const size = new THREE.Vector3(); box.getSize(size);
+  const center = new THREE.Vector3(); box.getCenter(center);
+  radius = Math.max(size.x, size.y, size.z) * 0.5 || 1;
+  // recentre model horizontally, drop onto ground (mimic buildGLBCar)
+  model.position.set(model.position.x - center.x, model.position.y - box.min.y, model.position.z - center.z);
+  info.textContent =
+    `model: ${url}\n` +
+    `size  X:${size.x.toFixed(2)} Y:${size.y.toFixed(2)} Z:${size.z.toFixed(2)}\n` +
+    `(game auto-scales longest of X,Z to ~4u)\n` +
+    `yellow arrow = game forward (-Z). Red=+X Green=+Y Blue=+Z`;
+  angle('hero');
+}
+
+const dist = () => radius * 3.2;
+function angle(which) {
+  const d = dist(), y = radius * 1.0;
+  const P = {
+    front:  [0, y, -d],   // camera on -Z looking toward +Z: sees the -Z face
+    back:   [0, y,  d],
+    left:   [-d, y, 0],
+    right:  [ d, y, 0],
+    top:    [0, d*1.2, 0.001],
+    hero:   [d*0.8, radius*1.1, -d*0.8],
+  }[which] || [d, y, d];
+  camera.position.set(P[0], P[1] + radius, P[2]);
+  camera.lookAt(0, radius, 0);
+}
+
+function wire() {
+  wireOn = !wireOn;
+  model.traverse(o => { if (o.isMesh) o.material.wireframe = wireOn; });
+}
+function spin() { spinning = !spinning; }
+
+window.__view = { angle, wire, spin, ready: false, get model(){return model}, THREE, scene, camera };
+
+const flat = params.get('flat') !== '0'; // flat shading on by default (matches the game)
+new GLTFLoader().load(url, (gltf) => {
+  model = gltf.scene;
+  model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false;
+    if (flat) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(m => { if (m) { m.flatShading = true; m.needsUpdate = true; } }); } } });
+  scene.add(model);
+  fit();
+  window.__view.ready = true;
+  console.log('MODEL_LOADED', url);
+}, undefined, (e) => { info.textContent = 'LOAD ERROR: ' + (e?.message || e); console.error('LOAD_ERROR', e); });
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+renderer.setAnimationLoop(() => {
+  if (model && spinning) model.rotation.y += 0.01;
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

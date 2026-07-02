@@ -3,3 +3,6 @@ www/
 .DS_Store
 *.log
 .claude/
+
+# raw (pre-optimization) Tripo car models — large, regenerable
+models/_raw/

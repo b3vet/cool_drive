@@ -259,8 +259,7 @@ el('radioMute').addEventListener('click', () => { const m = audio.toggleMute(); 
 audio.setOnRadioError((name) => { el('radioName').textContent = '⚠ ' + name + ' unavailable'; el('radioPower').classList.remove('on'); });
 
 // mobile controls: invisible touch zones + boost button + tilt settings + gear
-input.bindZones(el('touchLayer'));
-input.bindHold(el('btnBoostM'), 'boost');
+input.bindZones(); // gas/brake/handbrake/boost all read from window-level multitouch
 el('gearBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleSettings(); audio.sfx.ui(); });
 el('settingsClose').addEventListener('click', () => { settingsEl.classList.remove('open'); audio.sfx.ui(); });
 el('camBtn').addEventListener('click', (e) => { e.stopPropagation(); if (cam) cam.cycle(); audio.sfx.ui(); });
@@ -292,6 +291,7 @@ let wasBoosting = false;
 let distance = 0;
 let topSpeed = 0;
 let bestCombo = 0;
+let trackDriftSec = 0;
 let lastFrameTime = 0;
 
 function frame(now) {
@@ -335,7 +335,11 @@ function frame(now) {
     topSpeed = Math.max(topSpeed, carState.forwardSpeed);
     bestCombo = Math.max(bestCombo, scoring.st.multiplier);
     if (Math.hypot(carState.x - world.townCenter.x, carState.z - world.townCenter.z) < 70) ach.event('town');
-    ach.update({ score: scoring.st.score, bestCombo, longestDrift: scoring.st.longestDrift, topSpeed, distance });
+    // credit drifting done inside the walled drift track (for the Track Rat achievement)
+    if (carState.drifting && carState.speed > PHYS.minDriftSpeed && world.onDriftTrack(carState.x, carState.z)) {
+      trackDriftSec += dt;
+    }
+    ach.update({ score: scoring.st.score, bestCombo, longestDrift: scoring.st.longestDrift, topSpeed, distance, trackDriftTime: trackDriftSec });
   }
 
   // interpolate render transform
@@ -352,6 +356,7 @@ function frame(now) {
   effects.update(render, car.rearOffsets, carState, dt);
   updateCones(world, dt);
   updatePosts(world, dt);
+  world.updateBoundary(carState, dt);
   world.updateAtmosphere(ctx.camera.position, dt);
   car.tlMat.emissiveIntensity = cmd.brake || cmd.handbrake ? 2.4 : 1.0;
 
@@ -386,7 +391,7 @@ function frame(now) {
 }
 
 // expose a tiny debug handle
-window.__game = { carState, scoring, PHYS, input, world, ach, audio, start: startGame, reset: resetCar };
+window.__game = { carState, scoring, PHYS, input, world, ach, audio, ctx, renderer, get cam() { return cam; }, start: startGame, reset: resetCar };
 
 buildStartUI();
 // these hints are Safari/web-only — never show them inside the native (Capacitor) app
