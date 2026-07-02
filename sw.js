@@ -1,9 +1,9 @@
 // CoolDrive service worker — network-first (always fresh when online, offline-capable).
 // Network-first avoids serving stale modules during development while still letting
 // the game work with no connection after the first visit.
-const CACHE = 'cooldrive-v1';
+const CACHE = 'cooldrive-v2';
 const CORE = [
-  './', './index.html', './manifest.webmanifest', './icon.svg',
+  './', './index.html', './manifest.webmanifest',
   './icon-192.png', './icon-512.png', './icon-180.png',
   './vendor/es-module-shims.js',
   './vendor/three/build/three.module.min.js',
