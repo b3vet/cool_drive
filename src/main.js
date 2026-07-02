@@ -283,12 +283,17 @@ el('recenterBtn').addEventListener('click', () => { input.recenterTilt(); audio.
 window.addEventListener('keydown', startGame, { once: false });
 el('startScreen').addEventListener('click', startGame);
 el('btnStart').addEventListener('click', (e) => { e.stopPropagation(); startGame(); });
-// Resume/unlock the WebAudio context on the VERY FIRST raw gesture (capture phase,
-// before startGame's gyro-permission dialog) so car SFX start on the first tap on
-// mobile — not only after the radio is toggled.
-const unlockAudio = () => audio.start();
-['pointerdown', 'touchstart', 'mousedown'].forEach((ev) =>
-  window.addEventListener(ev, unlockAudio, { capture: true, passive: true, once: true }));
+// Unlock/resume the WebAudio context. iOS often needs the resume to land on a
+// gesture with an ALREADY-created context (creating + resuming in one gesture
+// leaves it suspended — that's why toggling the radio was what unstuck it). So we
+// retry on EVERY gesture (pointer/touch/click/key) until the context is actually
+// running, THEN stop. This makes car SFX start on the first tap, no radio needed.
+const UNLOCK_EVENTS = ['keydown', 'pointerdown', 'touchend', 'click'];
+function unlockAudio() {
+  audio.start();
+  if (audio.isRunning()) UNLOCK_EVENTS.forEach((ev) => window.removeEventListener(ev, unlockAudio, true));
+}
+UNLOCK_EVENTS.forEach((ev) => window.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
 // ---- layout / orientation --------------------------------------------------
 // On a PORTRAIT mobile browser, rotate the whole game 90° to landscape so it
 // fills the roomy portrait viewport (slowroads-style) — no forced landscape, no

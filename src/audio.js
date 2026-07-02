@@ -25,7 +25,6 @@ export function createAudio() {
   let ctx = null;
   let master, sfxBus, musicBus;
   let started = false;
-  let unlockedOnce = false;
   let muted = false;
   let masterVol = 0.8;
   let musicVol = 0.5;
@@ -292,20 +291,24 @@ export function createAudio() {
   // ---- lifecycle -----------------------------------------------------------
   function start() {
     if (!ensure()) return;
-    if (ctx.state === 'suspended') ctx.resume();
-    if (!started) { buildContinuous(); started = true; }
-    // iOS unlock: play a 1-frame silent buffer INSIDE the user gesture so audio
-    // output actually starts on the first tap (not only once the radio is toggled).
-    if (!unlockedOnce) {
+    // iOS/Safari: creating the AudioContext AND resuming it in the SAME gesture
+    // often leaves it suspended — the resume only "takes" on a LATER gesture with
+    // an already-existing context (which is why toggling the radio unstuck it).
+    // So resume on EVERY gesture until it's actually running (main.js fires this on
+    // pointerdown/touchend/click), playing a 1-frame silent buffer as the classic
+    // iOS output-unlock nudge each time it's still suspended.
+    if (ctx.state === 'suspended') {
+      ctx.resume();
       try {
         const b = ctx.createBufferSource();
         b.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
         b.connect(ctx.destination);
         b.start(0);
       } catch (e) {}
-      unlockedOnce = true;
     }
+    if (!started) { buildContinuous(); started = true; }
   }
+  const isRunning = () => !!ctx && ctx.state === 'running';
   function setMuted(m) {
     muted = m;
     if (master) master.gain.setTargetAtTime(m ? 0 : masterVol, ctx.currentTime, 0.05);
@@ -326,7 +329,7 @@ export function createAudio() {
   function toggleMute() { setMuted(!muted); return muted; }
 
   return {
-    start, sfx, updateEngine, updateSkid,
+    start, isRunning, sfx, updateEngine, updateSkid,
     radioToggle, nextStation, station, isRadioOn,
     setMuted, toggleMute, setMusicVol, setSfxVol,
     setOnRadioError(fn) { onRadioError = fn; },
