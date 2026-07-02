@@ -42,12 +42,14 @@ applyWorldPreset(world, ctx.preset);
 let targetFrameMs = 1000 / 60;
 let shadowEvery = 2;
 let shadowTick = 0;
+let layoutReady = false; // true once applyLayout() has run (handles rotation-aware sizing)
 let qualityKey = localStorage.getItem('cooldrive.quality') || DEFAULT_QUALITY;
 function setQuality(key) {
   const q = QUALITY[key] || QUALITY.medium;
   qualityKey = key;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatio));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  if (layoutReady) applyLayout(); // re-apply rotation-aware size after a pixelRatio change
   ctx.sun.shadow.mapSize.set(q.shadow, q.shadow);
   if (ctx.sun.shadow.map) { ctx.sun.shadow.map.dispose(); ctx.sun.shadow.map = null; }
   renderer.shadowMap.needsUpdate = true;
@@ -270,9 +272,39 @@ el('recenterBtn').addEventListener('click', () => { input.recenterTilt(); audio.
 window.addEventListener('keydown', startGame, { once: false });
 el('startScreen').addEventListener('click', startGame);
 el('btnStart').addEventListener('click', (e) => { e.stopPropagation(); startGame(); });
-window.addEventListener('resize', () => onResize(ctx, renderer));
-window.addEventListener('orientationchange', () => setTimeout(() => onResize(ctx, renderer), 250));
-if (window.visualViewport) window.visualViewport.addEventListener('resize', () => onResize(ctx, renderer));
+// ---- layout / orientation --------------------------------------------------
+// On a PORTRAIT mobile browser, rotate the whole game 90° to landscape so it
+// fills the roomy portrait viewport (slowroads-style) — no forced landscape, no
+// Add-to-Home requirement. On desktop / landscape / the native app: no rotation.
+const rotorEl = el('rotor');
+function applyLayout() {
+  const vv = window.visualViewport;
+  const vw = Math.round((vv && vv.width) || window.innerWidth);
+  const vh = Math.round((vv && vv.height) || window.innerHeight);
+  const rotate = isMobile && vh > vw; // portrait viewport on a phone
+  document.body.classList.toggle('rotated', rotate);
+  input.setRotated(rotate, vw, vh);
+  if (rotate) {
+    // a landscape box (vh × vw) rotated 90° CW about the top-left, shifted right
+    // by vw so it lands exactly over the portrait viewport
+    rotorEl.style.width = vh + 'px';
+    rotorEl.style.height = vw + 'px';
+    rotorEl.style.left = vw + 'px';
+    rotorEl.style.top = '0px';
+    rotorEl.style.transform = 'rotate(90deg)';
+    renderer.setSize(vh, vw);
+    ctx.camera.aspect = vh / vw;
+  } else {
+    rotorEl.style.width = rotorEl.style.height = rotorEl.style.left = rotorEl.style.top = rotorEl.style.transform = '';
+    renderer.setSize(vw, vh);
+    ctx.camera.aspect = vw / vh;
+  }
+  ctx.camera.updateProjectionMatrix();
+  layoutReady = true;
+}
+window.addEventListener('resize', applyLayout);
+window.addEventListener('orientationchange', () => setTimeout(applyLayout, 250));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', applyLayout);
 
 // ---- achievements drain ----------------------------------------------------
 function drainAchievements() {
@@ -397,11 +429,9 @@ buildStartUI();
 // these hints are Safari/web-only — never show them inside the native (Capacitor) app
 const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 if (!isNative && isMobile && !window.isSecureContext) { const w = el('secureWarn'); if (w) w.style.display = 'block'; }
-// iOS Safari can't fully hide its chrome in a tab — prompt Add to Home Screen for fullscreen (web only)
-const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
-const standalone = isNative || window.navigator.standalone === true ||
-  (window.matchMedia && (window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches));
-if (!isNative && isMobile && isIOS && !standalone) { const w = el('a2hsHint'); if (w) w.style.display = 'block'; }
+// (Add-to-Home is no longer required — portrait now renders the game rotated to
+// landscape and fills the screen, so we don't nag about fullscreen.)
+applyLayout();
 applyTuning();
 hud.renderAchievements(ach.progress());
 el('presetName').textContent = ctx.preset.name;

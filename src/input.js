@@ -28,6 +28,14 @@ export function createInput() {
   // ---- mobile touch state ---------------------------------------------------
   const touch = { throttle: false, brake: false, handbrake: false, boost: false };
 
+  // ---- portrait-rotation state (set from main's applyLayout) ----------------
+  // On a portrait mobile browser the whole game is CSS-rotated 90° to landscape,
+  // so touch coords must be mapped into that rotated "game space" and the gyro
+  // must read the landscape tilt axis.
+  let rotated = false;
+  let rvw = window.innerWidth, rvh = window.innerHeight;
+  const setRotated = (on, vw, vh) => { rotated = on; if (vw) rvw = vw; if (vh) rvh = vh; };
+
   // ---- gyroscope ------------------------------------------------------------
   let motionActive = false;
   let useTilt = false;
@@ -41,7 +49,8 @@ export function createInput() {
     const angle = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
     // pick the axis that maps to left/right "wheel" tilt for the current orientation
     let t;
-    if (angle === 90) t = e.beta;
+    if (rotated) t = e.beta; // portrait viewport but rendering landscape -> phone held sideways
+    else if (angle === 90) t = e.beta;
     else if (angle === 270 || angle === -90) t = -e.beta;
     else if (angle === 180) t = -e.gamma;
     else t = e.gamma; // 0 / portrait
@@ -77,10 +86,15 @@ export function createInput() {
   };
 
   // ---- touch zones (multi-touch) -------------------------------------------
-  function zoneOf(x, y) {
-    const W = window.innerWidth, H = window.innerHeight;
-    if (y > H * 0.8) return 'handbrake'; // bottom strip
-    return x < W * 0.5 ? 'brake' : 'gas'; // left = brake, right = gas
+  // Map a raw viewport touch into "game space". When the game is CSS-rotated 90°
+  // CW about the top-left, screen (sx,sy) -> game (sy, innerWidth - sx).
+  function gameCoords(cx, cy) {
+    if (rotated) return { x: cy, y: rvw - cx, W: rvh, H: rvw };
+    return { x: cx, y: cy, W: rvw, H: rvh };
+  }
+  function zoneOf(gx, gy, W, H) {
+    if (gy > H * 0.8) return 'handbrake'; // bottom strip
+    return gx < W * 0.5 ? 'brake' : 'gas'; // left = brake, right = gas
   }
   // Recompute every driving control from the FULL set of active touches on each
   // event. Reading window-level `e.touches` (not per-element changedTouches) makes
@@ -93,12 +107,15 @@ export function createInput() {
   function recomputeTouches(list) {
     let g = false, b = false, h = false, bo = false;
     for (const t of list) {
+      // elementFromPoint uses the on-screen (post-transform) hit test, so raw
+      // client coords correctly resolve buttons even when the game is rotated.
       const el = document.elementFromPoint(t.clientX, t.clientY);
       if (el && el.closest) {
         if (el.closest('#btnBoostM')) { bo = true; continue; } // boost button (a held control)
         if (el.closest(TAP_CONTROLS)) continue; // menu/gear/radio — not a driving control
       }
-      const z = zoneOf(t.clientX, t.clientY);
+      const gc = gameCoords(t.clientX, t.clientY);
+      const z = zoneOf(gc.x, gc.y, gc.W, gc.H);
       if (z === 'gas') g = true;
       else if (z === 'brake') b = true;
       else if (z === 'handbrake') h = true;
@@ -169,7 +186,7 @@ export function createInput() {
 
   return {
     sample, consumePressed, clearPressed,
-    bindZones, bindHold,
+    bindZones, bindHold, setRotated,
     enableMotion, recenterTilt, setTiltSensitivity, setTiltInvert, isMotionActive, deviceRoll,
     _keys: keys,
   };

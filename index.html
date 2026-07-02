@@ -28,7 +28,12 @@
     color: var(--fg); -webkit-user-select: none; user-select: none; touch-action: none;
     position: fixed; inset: 0; overscroll-behavior: none;
   }
-  #app { position: fixed; inset: 0; height: 100vh; height: 100dvh; }
+  /* #rotor wraps the whole game. On a portrait mobile browser it is sized to a
+     landscape box and rotated 90° (slowroads-style) so the game fills the roomy
+     portrait viewport as landscape — no "rotate device" wall, no Add-to-Home
+     required. Geometry (size/left/transform) is set from JS in applyLayout(). */
+  #rotor { position: fixed; inset: 0; transform-origin: top left; }
+  #app { position: absolute; inset: 0; }
   /* keep edge controls clear of the notch / home indicator */
   #scoreWrap { padding-left: env(safe-area-inset-left); padding-top: env(safe-area-inset-top); }
   #speedWrap { margin-right: env(safe-area-inset-right); margin-bottom: env(safe-area-inset-bottom); }
@@ -200,9 +205,8 @@
   #btnBoostM.active { filter: brightness(1.4); transform: translateX(-50%) scale(.94); }
   #btnBoostM span { font-size: 11px; opacity: .85; }
 
-  #rotateHint { position: fixed; inset: 0; z-index: 40; display: none; place-items: center; text-align: center; background: rgba(8,10,18,.96); color: var(--fg); font-weight: 700; font-size: 19px; line-height: 1.7; }
-  #rotateHint .rot { font-size: 46px; display: block; margin-bottom: 12px; }
-  @media (orientation: portrait) { body.mobile #rotateHint { display: grid; } }
+  /* (removed the portrait "rotate your device" wall — portrait now renders the
+     game rotated to landscape and fills the screen, so no wall is needed) */
 
   .mobileOnly { display: none; }
   body.mobile .mobileOnly { display: block; }
@@ -252,6 +256,7 @@
 </script>
 </head>
 <body>
+<div id="rotor">
 <div id="app"></div>
 
 <!-- HUD -->
@@ -292,9 +297,6 @@
 <!-- settings gear + camera-change (camera shown on mobile only) -->
 <button id="camBtn" title="Change camera">🎥</button>
 <button id="gearBtn" title="Settings">⚙</button>
-
-<!-- portrait warning (mobile only) -->
-<div id="rotateHint"><div><span class="rot">⟳</span>Rotate your device<br/>to landscape to drive</div></div>
 
 <!-- settings -->
 <div id="settings">
@@ -347,6 +349,7 @@
     <div class="startfoot" id="a2hsHint" style="display:none;margin-top:8px">📲 For <b>true fullscreen</b> (no Safari bars): tap <b>Share</b> → <b>Add to Home Screen</b>, then open CoolDrive from your home screen.</div>
   </div>
 </div>
+</div><!-- /#rotor -->
 
 <script type="module" src="./src/main.js"></script>
 <script>
