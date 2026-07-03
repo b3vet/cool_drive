@@ -13,8 +13,8 @@
 // Add your own stations here. { name, url } streams via <audio>; the first entry
 // is the built-in generative station (no url).
 export const RADIO_STATIONS = [
-  { name: 'Night Run', tracks: ['./audio/night_run_1.mp3', './audio/night_run_2.mp3'] },
-  { name: 'Sunset', tracks: ['./audio/sunset_1.mp3', './audio/sunset_2.mp3'] },
+  { name: 'Night Run', tracks: ['./audio/night_run_1.mp3', './audio/night_run_2.mp3', './audio/night_run_3.mp3', './audio/night_run_4.mp3'] },
+  { name: 'Sunset', tracks: ['./audio/sunset_1.mp3', './audio/sunset_2.mp3', './audio/sunset_3.mp3'] },
   { name: 'CoolDrive FM', generative: true }, // built-in synth station — no files
   // A station is either { url: '...' } (one looping song), { tracks: [...] } (a playlist
   // that auto-advances), or { generative: true }. Add `stream: true` for a live stream.

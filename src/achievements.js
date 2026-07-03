@@ -18,6 +18,10 @@ export const ACHIEVEMENTS = [
   { id: 'cone_killer', icon: '🚧', name: 'Cone Killer', desc: 'Knock over 20 cones', test: (s) => s.conesHit >= 20 },
   { id: 'tourist', icon: '🌃', name: 'City Lights', desc: 'Find your way to the town', test: (s) => s.visitedTown },
   { id: 'wanderer', icon: '🗺️', name: 'Wanderer', desc: 'Drive 5 km total', test: (s) => s.distance >= 5000 },
+  { id: 'roadtripper', icon: '🛣️', name: 'Road Tripper', desc: 'Drive 20 km total', test: (s) => s.distance >= 20000 },
+  { id: 'frontier', icon: '🧭', name: 'Frontier', desc: 'Reach 3 km from home', test: (s) => s.farthest >= 3000 },
+  { id: 'wild_circuit', icon: '🌀', name: 'Wild Circuit', desc: 'Drift a circuit out in the wild', test: (s) => s.procDriftTime >= 4 },
+  { id: 'ghost_town', icon: '🏚️', name: 'Off the Map', desc: 'Find a town beyond the horizon', test: (s) => s.visitedProcTown },
   { id: 'crash', icon: '💥', name: 'Ouch', desc: 'Crash into something solid', test: (s) => s.crashes >= 1 },
   { id: 'boost_junkie', icon: '⚡', name: 'Boost Junkie', desc: 'Use boost 10 times', test: (s) => s.boosts >= 10 },
   { id: 'night_owl', icon: '🌙', name: 'Night Owl', desc: 'Drift under the neon night', test: (s) => s.nightDriven },
@@ -43,7 +47,10 @@ export function createAchievements() {
     boosts: 0,
     driftCount: 0,
     trackDriftTime: 0,
+    procDriftTime: 0,
+    farthest: 0,
     visitedTown: false,
+    visitedProcTown: false,
     nightDriven: false,
     carsDriven: new Set(),
   };
@@ -87,6 +94,7 @@ export function createAchievements() {
     else if (type === 'car') stats.carsDriven.add(value);
     else if (type === 'night') stats.nightDriven = true;
     else if (type === 'town') stats.visitedTown = true;
+    else if (type === 'proctown') stats.visitedProcTown = true;
     check();
   }
 

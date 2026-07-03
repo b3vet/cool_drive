@@ -9,7 +9,7 @@ import { PHYS, PRESETS, PROFILES, CARS, QUALITY, DEFAULT_QUALITY } from './confi
 import { createRenderer, createScene, applyPreset, onResize } from './scene.js';
 import { buildWorld, resolveCollisions, updateCones, updatePosts, applyWorldPreset } from './world.js';
 import { buildCar, applyCarVisual } from './car.js';
-import { createCarState, stepPhysics, snapshot } from './physics.js';
+import { createCarState, stepPhysics, snapshot, snapshotInto } from './physics.js';
 import { createInput } from './input.js';
 import { createChaseCam } from './camera.js';
 import { createEffects } from './effects.js';
@@ -65,6 +65,7 @@ function setQuality(key) {
   renderer.shadowMap.needsUpdate = true;
   targetFrameMs = 1000 / q.fps;
   shadowEvery = q.shadowEvery;
+  if (world && world.setQuality) world.setQuality(key); // streaming radius per tier
   try { localStorage.setItem('cooldrive.quality', key); } catch (e) {}
 }
 setQuality(qualityKey);
@@ -136,8 +137,8 @@ let curr = snapshot(carState);
 const render = { x: SPAWN.x, z: SPAWN.z, heading: SPAWN.heading, steerAngle: 0, speed: 0 };
 function lerpAngle(a, b, t) { const d = Math.atan2(Math.sin(b - a), Math.cos(b - a)); return a + d * t; }
 
-function resetCarState() {
-  carState.x = SPAWN.x; carState.z = SPAWN.z; carState.heading = SPAWN.heading;
+function resetCarState(x = SPAWN.x, z = SPAWN.z, heading = SPAWN.heading) {
+  carState.x = x; carState.z = z; carState.heading = heading;
   carState.vx = 0; carState.vz = 0; carState.omega = 0; carState.steerAngle = 0;
   carState.grip = PHYS.gripNormal; carState.boost = 0;
   carState.forwardSpeed = 0; carState.lateralSpeed = 0; carState.slip = 0; carState.speed = 0;
@@ -172,7 +173,14 @@ function startGame() {
 
 function resetCar() {
   scoring.bank();
-  resetCarState();
+  // far from home, R drops you back onto the nearest road (facing along it) instead
+  // of teleporting all the way home; near home it still returns to the fixed spawn.
+  let placed = false;
+  if (world.homeDist && world.homeDist(carState.x, carState.z) > 3000 && world.nearestRoad) {
+    const r = world.nearestRoad(carState.x, carState.z);
+    if (r) { resetCarState(r.x, r.z, r.heading); placed = true; }
+  }
+  if (!placed) resetCarState();
   car.prevFwd = 0;
   car.chassis.rotation.set(0, 0, 0);
   prev = snapshot(carState); curr = snapshot(carState);
@@ -360,6 +368,9 @@ let distance = 0;
 let topSpeed = 0;
 let bestCombo = 0;
 let trackDriftSec = 0;
+let procDriftSec = 0;
+let farthest = 0;
+let procTownCheckAcc = 0;
 let lastFrameTime = 0;
 
 function frame(now) {
@@ -385,14 +396,14 @@ function frame(now) {
     acc += dt;
     let steps = 0;
     while (acc >= PHYS.STEP && steps < MAX_STEPS) {
-      prev = curr;
+      const _tmp = prev; prev = curr; curr = _tmp; // ping-pong the two buffers (no per-step alloc)
       stepPhysics(carState, cmd, PHYS.STEP);
       const col = resolveCollisions(carState, world);
       if (col.crash) { scoring.fail(); crashed = true; }
       coneHits += col.cones;
       postHits += col.posts;
       scoring.step(carState, PHYS.STEP);
-      curr = snapshot(carState);
+      snapshotInto(curr, carState);
       acc -= PHYS.STEP;
       steps++;
     }
@@ -407,8 +418,22 @@ function frame(now) {
     if (carState.drifting && carState.speed > PHYS.minDriftSpeed && world.onDriftTrack(carState.x, carState.z)) {
       trackDriftSec += dt;
     }
-    ach.update({ score: scoring.st.score, bestCombo, longestDrift: scoring.st.longestDrift, topSpeed, distance, trackDriftTime: trackDriftSec });
+    // procedural-world progress: farthest reach, drifting a wild circuit, finding a wild town
+    farthest = Math.max(farthest, world.homeDist(carState.x, carState.z));
+    if (carState.drifting && carState.speed > PHYS.minDriftSpeed && world.onProcCircuit(carState.x, carState.z)) {
+      procDriftSec += dt;
+    }
+    procTownCheckAcc += dt;
+    if (procTownCheckAcc >= 0.25) { // scanning every chunk is O(records) — throttle to 4 Hz
+      procTownCheckAcc = 0;
+      if (world.onProcTown(carState.x, carState.z)) ach.event('proctown');
+    }
+    ach.update({ score: scoring.st.score, bestCombo, longestDrift: scoring.st.longestDrift, topSpeed, distance, trackDriftTime: trackDriftSec, procDriftTime: procDriftSec, farthest });
   }
+
+  // stream chunks around the car + maybe rebase the origin. Runs AFTER physics and
+  // BEFORE interpolation/camera so a rebase shift is atomic within the frame.
+  world.update(carState, dt);
 
   // interpolate render transform
   const alpha = Math.min(acc / PHYS.STEP, 1);
@@ -424,7 +449,6 @@ function frame(now) {
   effects.update(render, car.rearOffsets, carState, dt);
   updateCones(world, dt);
   updatePosts(world, dt);
-  world.updateBoundary(carState, dt);
   world.updateAtmosphere(ctx.camera.position, dt);
   car.tlMat.emissiveIntensity = cmd.brake || cmd.handbrake ? 2.4 : 1.0;
 
@@ -456,6 +480,7 @@ function frame(now) {
   // throttled shadow update (re-render the shadow map only every Nth frame)
   if (++shadowTick >= shadowEvery) { renderer.shadowMap.needsUpdate = true; shadowTick = 0; }
   renderer.render(ctx.scene, ctx.camera);
+  updateHud(dt); // dev perf overlay (read renderer.info AFTER the render)
 }
 
 // expose a tiny debug handle
@@ -472,4 +497,50 @@ applyTuning();
 setAccent(ctx.preset.neon); // initial accent from the starting preset
 hud.renderAchievements(ach.progress());
 el('presetName').textContent = ctx.preset.name;
+
+// floating-origin rebase: when the streamer recenters the world, shift the car,
+// interpolation snapshots, camera and effects by the same delta so nothing jumps.
+world.setRebase((dx, dz) => {
+  carState.x -= dx; carState.z -= dz;
+  prev.x -= dx; prev.z -= dz; curr.x -= dx; curr.z -= dz;
+  render.x -= dx; render.z -= dz;
+  if (cam) cam.shift(-dx, -dz);
+  effects.shift(-dx, -dz);
+});
+world.setQuality(qualityKey); // apply the initial streaming radius
+
+// ---- dev perf HUD — draw calls / fps / memory / streaming depth. The instrument
+// for on-device thermal & memory soaks. Toggle with the ` (backtick) key, or start
+// it enabled with ?hud in the URL. Costs nothing while hidden.
+const dbgHud = document.createElement('div');
+dbgHud.id = 'perfHud';
+dbgHud.style.cssText = 'position:fixed;top:118px;left:16px;z-index:9999;font:11px/1.5 ui-monospace,Menlo,monospace;color:#9ff0d8;background:rgba(8,12,20,.6);padding:8px 11px;border-radius:8px;white-space:pre;pointer-events:none;letter-spacing:.02em';
+document.body.appendChild(dbgHud);
+let hudOn = /[?&]hud\b/.test(location.search);
+dbgHud.style.display = hudOn ? 'block' : 'none';
+window.addEventListener('keydown', (e) => {
+  if (e.key === '`' || e.code === 'Backquote') { hudOn = !hudOn; dbgHud.style.display = hudOn ? 'block' : 'none'; }
+});
+let fpsEMA = 60, hudAcc = 0;
+function updateHud(dtSec) {
+  if (!hudOn) return;
+  if (dtSec > 0) fpsEMA += (1 / dtSec - fpsEMA) * 0.1;
+  hudAcc += dtSec;
+  if (hudAcc < 0.25) return; // refresh 4x/s — readable, cheap
+  hudAcc = 0;
+  const inf = renderer.info, st = world.streamer;
+  dbgHud.textContent =
+    `fps   ${fpsEMA.toFixed(0).padStart(3)}    ${(1000 / Math.max(fpsEMA, 1)).toFixed(1)} ms\n` +
+    `draws ${String(inf.render.calls).padStart(4)}   tris ${(inf.render.triangles / 1000).toFixed(0)}k\n` +
+    `geo   ${String(inf.memory.geometries).padStart(4)}   tex  ${String(inf.memory.textures).padStart(3)}\n` +
+    `chunk ${String(st.chunkCount).padStart(4)}   queue ${st.queueDepth}\n` +
+    `pos   ${carState.x.toFixed(0)}, ${carState.z.toFixed(0)}   home ${world.homeDist(carState.x, carState.z).toFixed(0)} m`;
+}
+
+// Warm up shader compilation up front: the home region, the chunks primed around
+// spawn, the effects and the car are all already in the scene, so this compiles the
+// shared material/shadow/light variants the streamer reuses — avoiding a first-
+// encounter stutter mid-drive. One boot-time compile covers the reused set.
+try { renderer.compile(ctx.scene, ctx.camera); } catch (e) {}
+
 frame();

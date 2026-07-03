@@ -7,9 +7,13 @@
 // ============================================================================
 
 import * as THREE from 'three';
-import { WORLD } from './config.js';
+import { WORLD, CHUNK } from './config.js';
+import { createStreamer } from './chunks.js';
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+// the authored home region is clamped to (roughly) its reservation rectangle;
+// everything beyond is generated on the fly by the streamer.
+const RES = { x0: -1000, x1: 490, z0: -1000, z1: 490 };
 
 function mat(color, opts = {}) {
   return new THREE.MeshStandardMaterial({
@@ -87,9 +91,12 @@ function buildRibbon(samples, closed, offset, width, y, material) {
   return m;
 }
 
-export function buildWorld(scene, preset) {
+// Builds the fixed AUTHORED home region (the original map, minus the world boundary
+// and with scenery clamped to the reservation). Returns its group, shared materials/
+// geometries for the streamer, and its colliders bucketed by the caller.
+function buildHomeRegion(scene, preset) {
   const group = new THREE.Group();
-  group.name = 'world';
+  group.name = 'home';
   scene.add(group);
 
   const rng = mulberry32(20260627);
@@ -428,7 +435,14 @@ export function buildWorld(scene, preset) {
   const rockGeo = new THREE.DodecahedronGeometry(1.5, 0);
   const rockMat = mat(0x6c7078, { roughness: 1 });
 
-  const TREES = 1000;
+  // shared resources the streamer reuses for procedural chunks
+  const buildingGeo = new THREE.BoxGeometry(1, 1, 1);
+  // white base so per-instance color (setColorAt) reads true — both the home city
+  // and the procedural towns tint this via instanceColor rather than multiplying.
+  const buildingMat = mat(0xffffff, { roughness: 0.8, flat: false });
+  const padGeo = new THREE.CircleGeometry(27, 24);
+
+  const TREES = 600;
   const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, TREES);
   const tops = new THREE.InstancedMesh(topGeo, leafMat, TREES);
   trunks.castShadow = tops.castShadow = true;
@@ -451,16 +465,14 @@ export function buildWorld(scene, preset) {
   let guard = 0;
   // forest clusters
   while (ti < TREES && guard++ < TREES * 12) {
-    // cluster centers — spread across the whole (bigger) map
-    const ca = rng() * Math.PI * 2;
-    const cr = 130 + rng() * (WORLD.boundary - 210);
-    const ccx = Math.cos(ca) * cr;
-    const ccz = Math.sin(ca) * cr;
+    // cluster centers within the reservation (procedural biomes own everything else)
+    const ccx = RES.x0 + rng() * (RES.x1 - RES.x0);
+    const ccz = RES.z0 + rng() * (RES.z1 - RES.z0);
     const clusterN = 9 + Math.floor(rng() * 13);
     for (let k = 0; k < clusterN && ti < TREES; k++) {
       const x = ccx + (rng() - 0.5) * 30;
       const z = ccz + (rng() - 0.5) * 30;
-      if (Math.hypot(x, z) > WORLD.boundary + 120) continue;
+      if (x < RES.x0 || x > RES.x1 || z < RES.z0 || z > RES.z1) continue;
       if (nearRoad(x, z, W / 2 + 5) || nearLake(x, z)) continue;
       const sc = 0.7 + rng() * 1.1;
       dummy.position.set(x, 1.1 * sc, z);
@@ -486,20 +498,18 @@ export function buildWorld(scene, preset) {
   group.add(trunks, tops);
 
   // rocks — grouped into scattered rock fields (open ground left between them)
-  const ROCKS = 360;
+  const ROCKS = 220;
   const rocks = new THREE.InstancedMesh(rockGeo, rockMat, ROCKS);
   rocks.castShadow = true;
   let ri = 0;
   guard = 0;
   while (ri < ROCKS && guard++ < ROCKS * 12) {
-    const ca = rng() * Math.PI * 2;
-    const cr = 110 + rng() * (WORLD.boundary - 190);
-    const ccx = Math.cos(ca) * cr, ccz = Math.sin(ca) * cr;
+    const ccx = RES.x0 + rng() * (RES.x1 - RES.x0), ccz = RES.z0 + rng() * (RES.z1 - RES.z0);
     const n = 4 + Math.floor(rng() * 6);
     for (let k = 0; k < n && ri < ROCKS; k++) {
       const x = ccx + (rng() - 0.5) * 46;
       const z = ccz + (rng() - 0.5) * 46;
-      if (Math.hypot(x, z) > WORLD.boundary + 80) continue;
+      if (x < RES.x0 || x > RES.x1 || z < RES.z0 || z > RES.z1) continue;
       if (nearRoad(x, z, W / 2 + 4) || nearLake(x, z)) continue;
       const rsc = 0.5 + rng() * 1.6;
       dummy.position.set(x, 0.4 + rng() * 0.6, z);
@@ -518,37 +528,7 @@ export function buildWorld(scene, preset) {
   rocks.instanceMatrix.needsUpdate = true;
   group.add(rocks);
 
-  // landmark hills — snow baked into the mesh as vertex colours (no z-fighting cap)
-  const hillMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 });
-  const rockCol = new THREE.Color(0x55615a);
-  const snowCol = new THREE.Color(0xeef2f8);
-  const tmpCol = new THREE.Color();
-  for (let i = 0; i < 11; i++) {
-    const a = (i / 11) * Math.PI * 2 + 0.3;
-    const rr = WORLD.boundary * 0.6 + rng() * (WORLD.boundary * 0.22);
-    const h = 80 + rng() * 110;
-    const rad = 110 + rng() * 130;
-    const hx = Math.cos(a) * rr;
-    const hz = Math.sin(a) * rr;
-    // keep the mountains from swallowing the drift track in the corner
-    if (Math.hypot(hx - trackCenter.x, hz - trackCenter.z) < driftTrack.cull + rad + 40) continue;
-    const geo = new THREE.ConeGeometry(rad, h, 9);
-    const pos = geo.attributes.position;
-    const colors = new Float32Array(pos.count * 3);
-    const snowStart = 0.6 + rng() * 0.12; // height fraction where snow begins
-    for (let v = 0; v < pos.count; v++) {
-      const t = (pos.getY(v) + h / 2) / h; // 0 base .. 1 apex
-      const snow = THREE.MathUtils.smoothstep(t, snowStart, snowStart + 0.18);
-      tmpCol.copy(rockCol).lerp(snowCol, snow);
-      colors[v * 3] = tmpCol.r; colors[v * 3 + 1] = tmpCol.g; colors[v * 3 + 2] = tmpCol.b;
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    const hill = new THREE.Mesh(geo, hillMat);
-    hill.position.set(hx, h / 2 - 6, hz);
-    hill.rotation.y = rng() * Math.PI;
-    group.add(hill);
-    solids.push({ x: hx, z: hz, r: rad * 0.82 });
-  }
+  // (perimeter hills removed — procedural biomes provide the surrounding landscape)
 
   // a calm lake (landmark / atmosphere)
   const lakeMat = new THREE.MeshStandardMaterial({ color: preset.neon, roughness: 0.15, metalness: 0.6, transparent: true, opacity: 0.55 });
@@ -560,20 +540,18 @@ export function buildWorld(scene, preset) {
   // bushes for ground detail (instanced)
   const bushGeo = new THREE.IcosahedronGeometry(1.1, 0);
   const bushMat = mat(0x4a7d4a, { roughness: 1 });
-  const BUSHES = 640;
+  const BUSHES = 380;
   const bushes = new THREE.InstancedMesh(bushGeo, bushMat, BUSHES);
   bushes.castShadow = false; // tiny ground detail — skip the shadow-pass cost
   let bi = 0;
   guard = 0;
   while (bi < BUSHES && guard++ < BUSHES * 12) {
-    const ca = rng() * Math.PI * 2;
-    const cr = 80 + rng() * (WORLD.boundary - 150);
-    const ccx = Math.cos(ca) * cr, ccz = Math.sin(ca) * cr;
+    const ccx = RES.x0 + rng() * (RES.x1 - RES.x0), ccz = RES.z0 + rng() * (RES.z1 - RES.z0);
     const n = 5 + Math.floor(rng() * 8);
     for (let k = 0; k < n && bi < BUSHES; k++) {
       const x = ccx + (rng() - 0.5) * 40;
       const z = ccz + (rng() - 0.5) * 40;
-      if (Math.hypot(x, z) > WORLD.boundary + 80) continue;
+      if (x < RES.x0 || x > RES.x1 || z < RES.z0 || z > RES.z1) continue;
       if (nearRoad(x, z, W / 2 + 3) || nearLake(x, z)) continue;
       const sc = 0.5 + rng() * 0.9;
       dummy.position.set(x, sc * 0.7, z);
@@ -595,6 +573,10 @@ export function buildWorld(scene, preset) {
   const townRot = 0.35, tcos = Math.cos(townRot), tsin = Math.sin(townRot);
   const winMat = mat(0xffe7a8, { emissive: 0xffe7a8, emissiveIntensity: 0.5, roughness: 0.6 });
   const GRID = 9, CELL = 46, gHalf = (GRID - 1) / 2;
+  // Collect the building footprints first, then pack them into two InstancedMeshes
+  // (bodies + emissive window bands) so the whole city costs 2 draw calls instead
+  // of ~120. Each still stores an oriented box for exact-footprint collision.
+  const citySpecs = [];
   for (let gx = 0; gx < GRID; gx++) {
     for (let gz = 0; gz < GRID; gz++) {
       if (rng() < 0.24) continue; // open lots / plazas for drift room
@@ -608,18 +590,26 @@ export function buildWorld(scene, preset) {
       const bd = 12 + rng() * 15;
       const bh = 9 + rng() * 40;
       const shade = 0x6b7180 + Math.floor(rng() * 0x10) * 0x010101;
-      const b = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), mat(shade, { roughness: 0.8, flat: false }));
-      b.position.set(wx, bh / 2, wz);
-      b.rotation.y = townRot;
-      b.castShadow = true;
-      b.receiveShadow = true;
-      group.add(b);
+      citySpecs.push({ wx, wz, bw, bd, bh, shade });
       boxes.push({ x: wx, z: wz, hw: bw / 2, hd: bd / 2, cos: tcos, sin: tsin });
-      const band = new THREE.Mesh(new THREE.BoxGeometry(bw * 1.01, bh * 0.1, bd * 1.01), winMat);
-      band.position.set(wx, bh * 0.68, wz);
-      band.rotation.y = townRot;
-      group.add(band);
     }
+  }
+  if (citySpecs.length) {
+    const bodies = new THREE.InstancedMesh(buildingGeo, buildingMat, citySpecs.length);
+    bodies.castShadow = true; bodies.receiveShadow = true;
+    const bands = new THREE.InstancedMesh(buildingGeo, winMat, citySpecs.length);
+    const _bd = new THREE.Object3D(), _bc = new THREE.Color();
+    citySpecs.forEach((s, i) => {
+      _bd.position.set(s.wx, s.bh / 2, s.wz); _bd.rotation.set(0, townRot, 0); _bd.scale.set(s.bw, s.bh, s.bd);
+      _bd.updateMatrix(); bodies.setMatrixAt(i, _bd.matrix); bodies.setColorAt(i, _bc.setHex(s.shade));
+      _bd.position.set(s.wx, s.bh * 0.68, s.wz); _bd.scale.set(s.bw * 1.01, s.bh * 0.1, s.bd * 1.01);
+      _bd.updateMatrix(); bands.setMatrixAt(i, _bd.matrix);
+    });
+    bodies.instanceMatrix.needsUpdate = true; if (bodies.instanceColor) bodies.instanceColor.needsUpdate = true;
+    bands.instanceMatrix.needsUpdate = true;
+    // proper bounds so the city frustum-culls as a unit when you drive away
+    bodies.computeBoundingSphere(); bands.computeBoundingSphere();
+    group.add(bodies); group.add(bands);
   }
 
   // ---- cone slalom on a road straight (soft obstacles) ---------------------
@@ -636,31 +626,7 @@ export function buildWorld(scene, preset) {
     cones.push({ x, z, mesh: c, baseY: 0.5, knock: 0 });
   }
 
-  // ---- world edge: a glowing ring WALL that fades in as you approach it -----
-  // Always faintly present so you sense the world has an edge; ramps up bright
-  // (and pulses) once the car gets close, so the boundary is unmistakable.
-  const ringMat = new THREE.MeshBasicMaterial({ color: preset.neon, transparent: true, opacity: 0.14, side: THREE.DoubleSide });
-  const ring = new THREE.Mesh(new THREE.RingGeometry(WORLD.boundary - 2, WORLD.boundary + 2, 160), ringMat);
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.05;
-  group.add(ring);
-
-  const bWallH = WORLD.boundaryWallHeight;
-  const boundaryWallMat = new THREE.MeshBasicMaterial({ color: preset.neon, transparent: true, opacity: 0.05, side: THREE.BackSide, depthWrite: false });
-  const boundaryWall = new THREE.Mesh(new THREE.CylinderGeometry(WORLD.boundary, WORLD.boundary, bWallH, 160, 1, true), boundaryWallMat);
-  boundaryWall.position.y = bWallH / 2;
-  group.add(boundaryWall);
-
-  let edgeElapsed = 0;
-  // Call each frame: brighten the wall + ground ring the closer the car gets.
-  function updateBoundary(pos, dt) {
-    edgeElapsed += dt;
-    const r = Math.hypot(pos.x, pos.z);
-    const near = clamp(1 - (WORLD.boundary - r) / 260, 0, 1); // 0 far .. 1 at edge
-    const pulse = 0.5 + 0.5 * Math.sin(edgeElapsed * 4.5);
-    boundaryWallMat.opacity = 0.05 + near * (0.5 + 0.3 * pulse);
-    ringMat.opacity = 0.14 + near * 0.55;
-  }
+  // (no world-boundary ring/wall — the world is endless now)
 
   // ---- ambient dust motes that drift around the camera ---------------------
   const DUST = 150;
@@ -681,18 +647,19 @@ export function buildWorld(scene, preset) {
   const dustMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.32, transparent: true, opacity: 0.3, depthWrite: false, sizeAttenuation: true });
   const dust = new THREE.Points(dustGeo, dustMat);
   dust.frustumCulled = false;
-  group.add(dust);
+  scene.add(dust); // dust follows the camera in render space — not the (rebaseable) home group
 
   function updateAtmosphere(cam, dt) {
     for (let i = 0; i < DUST; i++) {
       let x = dustPos[i * 3] + dustVel[i * 3] * dt;
       let y = dustPos[i * 3 + 1] + dustVel[i * 3 + 1] * dt;
       let z = dustPos[i * 3 + 2] + dustVel[i * 3 + 2] * dt;
-      // wrap around the camera so motes always surround the player
-      if (x - cam.x > DUST_RANGE) x -= DUST_RANGE * 2;
-      else if (x - cam.x < -DUST_RANGE) x += DUST_RANGE * 2;
-      if (z - cam.z > DUST_RANGE) z -= DUST_RANGE * 2;
-      else if (z - cam.z < -DUST_RANGE) z += DUST_RANGE * 2;
+      // wrap around the camera so motes always surround the player (while: catches
+      // up in one frame even after a large origin rebase)
+      while (x - cam.x > DUST_RANGE) x -= DUST_RANGE * 2;
+      while (x - cam.x < -DUST_RANGE) x += DUST_RANGE * 2;
+      while (z - cam.z > DUST_RANGE) z -= DUST_RANGE * 2;
+      while (z - cam.z < -DUST_RANGE) z += DUST_RANGE * 2;
       if (y > 30) y = 1;
       dustPos[i * 3] = x; dustPos[i * 3 + 1] = y; dustPos[i * 3 + 2] = z;
     }
@@ -700,32 +667,74 @@ export function buildWorld(scene, preset) {
   }
 
   return {
-    group, cones, solids, boxes, walls, posts, postList, postMat, edgeMat, ringMat, dustMat,
-    boundaryWallMat, trackWallTopMat, driftTrack, onDriftTrack, updateBoundary, setTrackLights,
-    boundary: WORLD.boundary, roadCurves, townCenter: { x: townX, z: townZ },
-    updateAtmosphere,
+    group,
+    colliders: { solids, boxes, walls, postList, cones }, // ABSOLUTE coords, bucketed by the streamer
+    postsMesh: posts,
+    driftTrack, onDriftTrack, // absolute-space
+    townCenter: { x: townX, z: townZ }, // absolute
+    setTrackLights, updateAtmosphere,
+    postMat, edgeMat, trackWallTopMat, // for applyWorldPreset (shared with streamed content)
+    shared: {
+      roadMat: asphalt, edgeMat, dashMat,
+      trunkGeo, trunkMat, canopyGeo: topGeo, canopyMat: leafMat,
+      rockGeo, rockMat, bushGeo, bushMat,
+      buildingGeo, buildingMat,
+      trackMat, wallMat, wallCapMat: trackWallTopMat,
+      coneGeo, coneMat, padGeo,
+    },
   };
 }
 
-// Soft circular boundary + cone push-out. Returns true only on a hard slam.
-export function resolveCollisions(state, world) {
-  const B = world.boundary;
-  let hardHit = false;
+// ===========================================================================
+// buildWorld — endless world: the authored home region + a procedural streamer.
+// Returns the SAME facade shape main.js/resolveCollisions expect. The collision
+// arrays are the streamer's active set (refilled in place around the car). See
+// ENDLESS_WORLD_PLAN.md.
+// ===========================================================================
+export function buildWorld(scene, preset) {
+  const home = buildHomeRegion(scene, preset);
+  const streamer = createStreamer({ scene, shared: home.shared, home });
+  // per-session seed (reproduction beyond the session is a non-goal — see the plan)
+  const seed = (typeof crypto !== 'undefined' && crypto.getRandomValues)
+    ? crypto.getRandomValues(new Uint32Array(1))[0] : ((Date.now?.() || 1) >>> 0);
+  streamer.setSeed(seed);
+  streamer.primeAround(40, -30); // SPAWN is in the home region — colliders ready on frame 1
+  const shift = streamer.shiftTotal; // render = absolute - shift
 
-  const r = Math.hypot(state.x, state.z);
-  if (r > B) {
-    const nx = state.x / r;
-    const nz = state.z / r;
-    state.x = nx * B;
-    state.z = nz * B;
-    const vOut = state.vx * nx + state.vz * nz; // outward velocity
-    if (vOut > 0) {
-      // remove outward component + a little bounce so you slide along the edge
-      state.vx -= vOut * nx * 1.3;
-      state.vz -= vOut * nz * 1.3;
-      if (vOut > 16) hardHit = true; // only a fast slam breaks the combo
-    }
-  }
+  return {
+    group: home.group,
+    // active collision arrays (stable identity — the streamer refills them in place)
+    solids: streamer.active.solids, boxes: streamer.active.boxes, walls: streamer.active.walls,
+    postList: streamer.active.postList, cones: streamer.active.cones,
+    posts: home.postsMesh,
+    postMat: home.postMat, edgeMat: home.edgeMat, trackWallTopMat: home.trackWallTopMat,
+    ringMat: null, boundaryWallMat: null, dustMat: null, driftTrack: home.driftTrack,
+    // gameplay queries take RENDER coords -> convert to ABSOLUTE for the home data
+    onDriftTrack: (x, z) => home.onDriftTrack(x + shift.x, z + shift.z),
+    get townCenter() { return { x: home.townCenter.x - shift.x, z: home.townCenter.z - shift.z }; },
+    onProcCircuit: (x, z) => streamer.procCircuitAt(x, z),
+    onProcTown: (x, z) => streamer.procTownAt(x, z),
+    // absolute distance from the home origin (render -> absolute via + shift)
+    homeDist: (x, z) => Math.hypot(x + shift.x, z + shift.z),
+    setProcNight: (on) => streamer.setProcNight(on), // light procedural circuits at night
+    nearestRoad: (x, z) => streamer.nearestRoad(x, z), // render coords in/out (far-from-home respawn)
+    updateAtmosphere: home.updateAtmosphere,
+    setTrackLights: home.setTrackLights,
+    setQuality: (q) => streamer.setQuality(q),
+    setRebase: (fn) => streamer.setRebase(fn),
+    setSeed: (s) => streamer.setSeed(s),
+    update: (carState, dt) => streamer.update(carState, dt),
+    streamer,
+  };
+}
+
+// Push-out vs the active 3x3 collider set (solids/boxes/walls/cones/posts, all in
+// RENDER coords, refilled by the streamer). Endless — no world boundary. Returns
+// true only on a hard slam. The result is a pooled object (read it before the next
+// call) so the 120/s collision pass allocates nothing.
+const _colOut = { crash: false, cones: 0, posts: 0 };
+export function resolveCollisions(state, world) {
+  let hardHit = false;
 
   // solid objects (trees, rocks, buildings, hills): push the car out, kill the
   // velocity component going INTO the object, bounce a little, scrub speed.
@@ -801,51 +810,48 @@ export function resolveCollisions(state, world) {
       state.x += (dx / d) * push * 0.35;
       state.z += (dz / d) * push * 0.35;
       c.knock = Math.min(1, c.knock + 0.4);
+      if (c.persist && c.knock >= 0.8) c.knocked = true; // wild cones stay flattened (+persist across reload)
     }
   }
 
-  // drift-track walls: smooth segment collision — slide along, hard slam breaks combo.
-  // Only tested when the car is actually near the track (cheap bounding cull).
-  const dt = world.driftTrack;
-  if (dt) {
-    const dcx = state.x - dt.center.x;
-    const dcz = state.z - dt.center.z;
-    const cull = dt.cull + 6;
-    if (dcx * dcx + dcz * dcz < cull * cull) {
-      const half = carR + WORLD.wallThickness * 0.5;
-      for (const w of world.walls) {
-        const ex = w.x2 - w.x1, ez = w.z2 - w.z1;
-        const len2 = ex * ex + ez * ez || 1e-6;
-        let t = ((state.x - w.x1) * ex + (state.z - w.z1) * ez) / len2;
-        t = t < 0 ? 0 : t > 1 ? 1 : t;
-        const px = w.x1 + ex * t, pz = w.z1 + ez * t;
-        const wdx = state.x - px, wdz = state.z - pz;
-        const wd2 = wdx * wdx + wdz * wdz;
-        if (wd2 < half * half) {
-          const d = Math.max(Math.sqrt(wd2), 0.001);
-          const nx = wdx / d, nz = wdz / d;
-          state.x = px + nx * half; // push out to the wall surface
-          state.z = pz + nz * half;
-          const vIn = state.vx * nx + state.vz * nz; // velocity along outward normal
-          if (vIn < 0) {
-            state.vx -= (1 + e) * vIn * nx; // reflect the inward component
-            state.vz -= (1 + e) * vIn * nz;
-            if (-vIn > 13) hardHit = true; // a fast slam into the wall breaks the combo
-          }
-          state.vx *= 0.88; // scrub some speed on contact
-          state.vz *= 0.88;
-        }
+  // track / circuit walls: smooth segment collision — slide along, hard slam breaks
+  // combo. The active set is already spatially local (3x3 around the car), so no cull.
+  const half = carR + WORLD.wallThickness * 0.5;
+  for (const w of world.walls) {
+    const ex = w.x2 - w.x1, ez = w.z2 - w.z1;
+    const len2 = ex * ex + ez * ez || 1e-6;
+    let t = ((state.x - w.x1) * ex + (state.z - w.z1) * ez) / len2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const px = w.x1 + ex * t, pz = w.z1 + ez * t;
+    const wdx = state.x - px, wdz = state.z - pz;
+    const wd2 = wdx * wdx + wdz * wdz;
+    if (wd2 < half * half) {
+      const d = Math.max(Math.sqrt(wd2), 0.001);
+      const nx = wdx / d, nz = wdz / d;
+      state.x = px + nx * half; // push out to the wall surface
+      state.z = pz + nz * half;
+      const vIn = state.vx * nx + state.vz * nz; // velocity along outward normal
+      if (vIn < 0) {
+        state.vx -= (1 + e) * vIn * nx; // reflect the inward component
+        state.vz -= (1 + e) * vIn * nz;
+        if (-vIn > 13) hardHit = true; // a fast slam into the wall breaks the combo
       }
+      state.vx *= 0.88; // scrub some speed on contact
+      state.vz *= 0.88;
     }
   }
 
-  // roadside posts (blue sticks): collidable bollards — bend over, slow you a touch
+  // roadside posts (blue sticks): collidable bollards — bend over, slow you a touch.
+  // p.rx/p.rz are the RENDER-space coords set by the streamer gather (p.x/p.z stay
+  // absolute for the mesh matrix in updatePosts).
   let postHits = 0;
   const postRR = 0.5 + carR;
   for (const p of world.postList) {
     if (p.fallen) continue;
-    const dx = state.x - p.x;
-    const dz = state.z - p.z;
+    const px = p.rx !== undefined ? p.rx : p.x;
+    const pz = p.rz !== undefined ? p.rz : p.z;
+    const dx = state.x - px;
+    const dz = state.z - pz;
     if (dx * dx + dz * dz < postRR * postRR) {
       if (!p.knocking) {
         p.knocking = true;
@@ -857,7 +863,8 @@ export function resolveCollisions(state, world) {
     }
   }
 
-  return { crash: hardHit, cones: coneHits, posts: postHits };
+  _colOut.crash = hardHit; _colOut.cones = coneHits; _colOut.posts = postHits;
+  return _colOut;
 }
 
 // Animate knocked-over posts (called each render frame).
@@ -883,6 +890,10 @@ export function updatePosts(world, dt) {
 
 export function updateCones(world, dt) {
   for (const c of world.cones) {
+    if (c.knocked) { // persistent flattened cone (wild slalom) — stays down, no wobble
+      if (c.mesh.rotation.z !== 1.5) { c.mesh.rotation.z = 1.5; c.mesh.position.y = c.baseY - 0.12; }
+      continue;
+    }
     if (c.knock > 0) {
       c.knock = Math.max(0, c.knock - dt * 1.5);
       c.mesh.rotation.z = Math.sin(c.knock * 18) * c.knock * 0.5;
@@ -905,4 +916,5 @@ export function applyWorldPreset(world, preset) {
     world.trackWallTopMat.emissive.setHex(preset.neon);
   }
   if (world.setTrackLights) world.setTrackLights(!!preset.night); // stadium lights on at night
+  if (world.setProcNight) world.setProcNight(!!preset.night); // procedural circuit lights follow the same toggle
 }

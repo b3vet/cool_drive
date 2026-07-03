@@ -201,6 +201,24 @@ export const WORLD = {
   wallThickness: 0.9, // drift-track wall collision thickness
 };
 
+// ---- Endless chunk streaming (see ENDLESS_WORLD_PLAN.md) --------------------
+export const CHUNK = {
+  size: 256, // metres per chunk edge
+  simRing: 1, // Chebyshev radius of the collision/active set (3x3)
+  visualRing: { low: 3, medium: 4, high: 4 }, // render radius by quality tier
+  buildMs: { low: 1.5, medium: 2.5, high: 2.5 }, // per-frame mesh-build time slice
+  rebaseAt: 2048, // floating-origin rebase threshold (metres from render origin)
+  // authored home region reservation (inclusive chunk range) — never streamed/unloaded
+  homeMin: { cx: -4, cz: -4 }, homeMax: { cx: 1, cz: 1 },
+  perChunkCaps: { trees: 110, rocks: 60, bushes: 90, buildings: 26, cones: 18 },
+  // Floor for recyclable meshes per species. chunks.js raises this to the actual
+  // worst-case resident-chunk count derived from visualRing ((2*(vis+1)+1)^2 = 121)
+  // so a chunk under the car can never fail to check out its scenery + colliders.
+  poolSlots: 121,
+  roadGeoPool: 72, roadGeoVerts: 5200, // pooled road ribbon slots + max verts each
+  lightCap: 5, // max shadowless PointLights across all active landmark circuits
+};
+
 // ---- Time-of-day visual presets -------------------------------------------
 // Horizon color MUST equal fog color MUST equal clear color so the edge vanishes.
 export const PRESETS = {

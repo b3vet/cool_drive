@@ -174,3 +174,10 @@ export function stepPhysics(s, input, dt) {
 export function snapshot(s) {
   return { x: s.x, z: s.z, heading: s.heading, steerAngle: s.steerAngle, speed: s.speed };
 }
+
+// Fill an existing snapshot object in place — lets the fixed-step loop ping-pong two
+// buffers instead of allocating a snapshot every physics step (120/s).
+export function snapshotInto(t, s) {
+  t.x = s.x; t.z = s.z; t.heading = s.heading; t.steerAngle = s.steerAngle; t.speed = s.speed;
+  return t;
+}

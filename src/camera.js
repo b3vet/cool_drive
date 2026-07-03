@@ -123,5 +123,13 @@ export function createChaseCam(camera, car) {
     framedX = 0;
   }
 
-  return { update, cycle, setMode, reset, get mode() { return MODES[mode]; } };
+  // floating-origin rebase: shift the smoothed camera state by (dx,dz) without a snap
+  function shift(dx, dz) {
+    camera.position.x += dx; camera.position.z += dz;
+    smoothedLook.x += dx; smoothedLook.z += dz;
+    goalWorld.x += dx; goalWorld.z += dz;
+    lookWorld.x += dx; lookWorld.z += dz;
+  }
+
+  return { update, cycle, setMode, reset, shift, get mode() { return MODES[mode]; } };
 }

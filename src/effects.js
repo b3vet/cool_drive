@@ -98,6 +98,14 @@ class SkidTrail {
     this.hasPrev = false; // lift the pen so we don't draw a jump
   }
 
+  // floating-origin rebase: shift every laid quad + the pen by (dx,dz)
+  shift(dx, dz) {
+    const P = this.positions;
+    for (let i = 0; i < P.length; i += 3) { P[i] += dx; P[i + 2] += dz; }
+    this.prev.x += dx; this.prev.z += dz;
+    this.geo.attributes.position.needsUpdate = true;
+  }
+
   clear() {
     this.head = 0;
     this.count = 0;
@@ -258,5 +266,13 @@ export function createEffects(scene) {
     smoke.clear();
   }
 
-  return { update, reset, skids, smoke };
+  // floating-origin rebase: shift skid ribbons + smoke particles by (dx,dz)
+  function shift(dx, dz) {
+    for (const s of skids) s.shift(dx, dz);
+    const P = smoke.pos;
+    for (let i = 0; i < P.length; i += 3) { P[i] += dx; P[i + 2] += dz; }
+    smoke.geo.attributes.position.needsUpdate = true;
+  }
+
+  return { update, reset, shift, skids, smoke };
 }

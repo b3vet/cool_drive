@@ -9,7 +9,8 @@
     "build:web": "node scripts/build-www.mjs",
     "ios": "npm run build:web && npx cap sync ios && npx cap open ios",
     "ios:sync": "npm run build:web && npx cap sync ios",
-    "bump": "node scripts/bump-build.mjs"
+    "bump": "node scripts/bump-build.mjs",
+    "test": "node test_physics.mjs && node test_worldgen.mjs"
   },
   "license": "MIT",
   "dependencies": {
