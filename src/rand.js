@@ -69,4 +69,7 @@ export const SALT = {
   LANDMARK_KIND: 0x8888,
   CLUSTER: 0x9999,
   TOWN: 0xaaaa,
+  TOWN_BUILD: 0xabcd, // per-building town PRNG (was a raw literal in chunks.js)
+  REGION: 0xbb01,     // region-name generator
+  RING: 0xbb02,       // ring time-trial layout
 };

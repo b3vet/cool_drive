@@ -164,6 +164,16 @@ export const SCORE = {
   comboPerSecond: 0.12, // multiplier gained per continuous second drifting
   comboMax: 10, // multiplier cap
   graceTime: 1.1, // seconds you can be straight before combo banks/resets
+  // near-miss: bonus for shaving close to a solid (tree/rock/building/wall) mid-drift
+  nearMissBand: 1.4, // metres of clearance (past the collision radius) that counts as a shave
+  nearMissMinSpeed: 12, // m/s — no near-miss credit below this
+  nearMissPoints: 120, // base points per shave (x multiplier)
+  heatBonus: 0.5, // point-rate boost at full style heat (+50%)
+  heatDecay: 1.5, // seconds for heat to fall from 1 to 0
+  // transition links: reward flicking the slide side to side within one chain
+  linkBonus: 0.4, // multiplier added per link
+  linkDwell: 0.35, // min seconds held on a side before a flip counts as a link
+  linkMinSlipDeg: 14, // both sides must exceed this angle
 };
 
 // ---- Camera ----------------------------------------------------------------
@@ -217,6 +227,20 @@ export const CHUNK = {
   poolSlots: 121,
   roadGeoPool: 72, roadGeoVerts: 5200, // pooled road ribbon slots + max verts each
   lightCap: 5, // max shadowless PointLights across all active landmark circuits
+};
+
+// ---- Weather + day/night cycle --------------------------------------------
+export const WEATHER = {
+  gripMul: 0.86, // grip multiplier while wet (breaks traction earlier → bigger slides)
+  fogPull: 0.86, // fog far/near multiplier while wet (mistier)
+  rainCount: 500, // rain particles (one draw call)
+  rainRange: 70, // camera-follow wrap radius (m)
+  rainFall: 26, // fall speed (m/s)
+  rainOpacity: 0.42, // full-rain particle opacity
+  surpriseChance: 0.3, // chance a 'surprise' session rolls rain
+};
+export const CYCLE = {
+  secondsPerLeg: 160, // seconds to cross one preset→next (full golden→dawn→night→ loop ≈ 8 min)
 };
 
 // ---- Time-of-day visual presets -------------------------------------------

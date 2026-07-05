@@ -115,6 +115,41 @@
   @keyframes toastIn { from { transform: translateX(120%); opacity: 0 } to { transform: translateX(0); opacity: 1 } }
   @keyframes toastOut { to { transform: translateX(120%); opacity: 0 } }
 
+  /* ---------- Batch 2: near-miss / links / awards / compass / trials ---------- */
+  #nearFlash { position: fixed; left: 50%; top: 44%; transform: translate(-50%,-50%) skewX(-6deg); font-family: var(--disp); font-weight: 700; font-size: clamp(22px,4.5vw,40px); letter-spacing: .04em; color: var(--accent); text-shadow: 0 0 26px var(--accent-glow); opacity: 0; pointer-events: none; z-index: 6; }
+  #nearFlash.play { animation: shavePop .7s ease-out forwards; }
+  @keyframes shavePop { 0%{opacity:0; transform:translate(-50%,-50%) skewX(-6deg) scale(.7)} 20%{opacity:1; transform:translate(-50%,-58%) skewX(-6deg) scale(1.1)} 100%{opacity:0; transform:translate(-50%,-82%) skewX(-6deg) scale(1)} }
+
+  #awardFlash { position: fixed; left: 50%; top: 30%; transform: translate(-50%,-50%) skewX(-6deg); font-family: var(--disp); font-weight: 700; font-size: clamp(24px,5vw,46px); color: var(--gold); text-shadow: 0 0 30px rgba(255,210,74,.6); opacity: 0; pointer-events: none; z-index: 7; font-variant-numeric: tabular-nums; }
+  #awardFlash.play { animation: celebrate 1.4s cubic-bezier(.2,.8,.2,1) forwards; }
+
+  #linkTag { font-family: var(--disp); font-size: clamp(13px,2.6vw,20px); font-weight: 700; letter-spacing: .06em; color: var(--gold); text-shadow: 0 0 16px rgba(255,210,74,.5); margin-top: 4px; opacity: 0; transition: opacity .12s ease; }
+  #linkTag.show { opacity: .95; }
+  #linkTag.pop { animation: shake .35s; }
+
+  #compass { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; max-width: 250px; pointer-events: none; }
+  .cmp { display: flex; align-items: center; gap: 4px; font-family: var(--disp); font-size: 11px; font-weight: 600; letter-spacing: .03em; padding: 3px 8px 3px 6px; background: var(--panel-soft); clip-path: var(--facet-sm); box-shadow: inset 0 0 0 1px var(--accent-dim); color: #eef; white-space: nowrap; }
+  .cmp .arr { color: var(--accent); font-size: 13px; display: inline-block; line-height: 1; }
+  .cmp .d { opacity: .6; }
+
+  #trialHud { position: fixed; right: 24px; bottom: 118px; font-family: var(--disp); font-weight: 700; text-align: right; opacity: 0; transition: opacity .2s ease; }
+  #trialHud.show { opacity: 1; }
+  #trialHud .tl { font-size: 11px; letter-spacing: .18em; opacity: .6; text-transform: uppercase; }
+  #trialHud .tv { font-size: clamp(24px,4vw,34px); color: var(--accent); text-shadow: 0 0 20px var(--accent-glow); font-variant-numeric: tabular-nums; }
+
+  .toast.region { box-shadow: inset 3px 0 0 var(--accent), inset 0 0 0 1px var(--line); }
+  .toast.region .t1 { color: var(--accent); }
+  .toast.region .ic { filter: drop-shadow(0 0 8px var(--accent-glow)); }
+
+  /* boost speed lines — radial spokes masked out at the centre, converging inward */
+  #speedLines { position: fixed; inset: 0; z-index: 4; pointer-events: none; opacity: 0; transition: opacity .18s ease; mix-blend-mode: screen;
+    background: repeating-conic-gradient(from 0deg at 50% 55%, rgba(255,255,255,.07) 0 .45deg, transparent .45deg 5deg);
+    -webkit-mask-image: radial-gradient(circle at 50% 55%, transparent 30%, #000 74%);
+    mask-image: radial-gradient(circle at 50% 55%, transparent 30%, #000 74%); }
+  body.boosting #speedLines { opacity: .9; animation: speedZoom .6s ease-in-out infinite alternate; }
+  @keyframes speedZoom { from { transform: scale(1) } to { transform: scale(1.05) } }
+  @media (prefers-reduced-motion: reduce) { body.boosting #speedLines { animation: none; } }
+
   /* ---------- radio widget ---------- */
   #radio { position: fixed; left: 22px; bottom: 22px; z-index: 6; display: flex; align-items: center; gap: 8px; background: var(--panel-soft); clip-path: var(--facet); box-shadow: inset 0 0 0 1px var(--line); padding: 8px 12px 8px 10px; backdrop-filter: blur(8px); pointer-events: auto; font-size: 12px; }
   #radio button { pointer-events: auto; cursor: pointer; border: none; background: rgba(255,255,255,.09); color: var(--fg); width: 27px; height: 27px; clip-path: var(--facet-sm); font-size: 13px; display: grid; place-items: center; font-family: var(--disp); }
@@ -201,7 +236,7 @@
   .ach .an { font-family: var(--disp); font-weight: 600; font-size: 13px; }
   .ach .ad { color: var(--muted); font-size: 11px; }
   #settings .esc { margin-top: 20px; font-size: 11px; color: var(--muted); }
-  #quality { width: 100%; padding: 10px; clip-path: var(--facet-sm); background: var(--panel-soft); color: var(--fg); border: none; box-shadow: inset 0 0 0 1px var(--line); font-family: var(--disp); font-size: 12px; letter-spacing: .04em; }
+  #quality, #weatherSel { width: 100%; padding: 10px; clip-path: var(--facet-sm); background: var(--panel-soft); color: var(--fg); border: none; box-shadow: inset 0 0 0 1px var(--line); font-family: var(--disp); font-size: 12px; letter-spacing: .04em; }
 
   /* ---------- mobile controls (invisible touch zones + tilt steering) ------- */
   #touchLayer { position: fixed; inset: 0; z-index: 4; display: none; touch-action: none; }
@@ -248,6 +283,8 @@
 
   .mobileOnly { display: none; }
   body.mobile .mobileOnly { display: block; }
+  .nativeOnly { display: none; }
+  body.native .nativeOnly { display: block; }
   body.mobile #hint { display: none; }
 
   /* start-screen control guide (mobile) */
@@ -297,14 +334,20 @@
 <div id="rotor">
 <div id="app"></div>
 
+<!-- boost speed lines (CSS-only; toggled by body.boosting) -->
+<div id="speedLines"></div>
+
 <!-- HUD -->
 <div class="hud">
-  <div id="scoreWrap"><div id="score">0</div><div id="best">BEST 0</div></div>
+  <div id="scoreWrap"><div id="score">0</div><div id="best">BEST 0</div><div id="compass"></div></div>
   <div id="bankFlash"></div>
+  <div id="nearFlash">CLOSE!</div>
+  <div id="awardFlash"></div>
   <div id="presetName">Golden Hour</div>
   <div id="celebrate"><div class="big"></div><div class="sub"></div></div>
   <div id="driftFloat">D R I F T</div>
-  <div id="combo"><div id="comboVal">×1.0</div><div id="banked">+0</div></div>
+  <div id="combo"><div id="comboVal">×1.0</div><div id="banked">+0</div><div id="linkTag"></div></div>
+  <div id="trialHud"></div>
   <div id="speedWrap"><div id="speed">0</div><div class="unit">KM/H</div><div id="boostBar"><div id="boostFill"></div></div></div>
 </div>
 
@@ -355,6 +398,13 @@
   <div class="row mobileOnly"><label>Tilt sensitivity <span id="tiltSensVal">1.0</span></label><input id="tiltSens" type="range" min="0.4" max="2.5" step="0.1" value="1.0" /></div>
   <div class="row mobileOnly"><label class="tiltToggle"><input id="tiltInvert" type="checkbox" checked /> Invert tilt direction</label></div>
   <div class="row mobileOnly"><button id="recenterBtn">Recenter tilt (level = straight)</button></div>
+  <div class="row"><label>Weather</label>
+    <select id="weatherSel">
+      <option value="surprise">Surprise (sometimes rain)</option><option value="clear">Clear</option><option value="rain">Rain</option>
+    </select>
+  </div>
+  <div class="row"><label class="tiltToggle"><input id="autoCycle" type="checkbox" checked /> Auto day / night cycle</label></div>
+  <div class="row nativeOnly"><label class="tiltToggle"><input id="hapticsToggle" type="checkbox" checked /> Haptics</label></div>
   <div class="row"><button id="presetBtn">Change Time of Day</button></div>
   <div class="achsec"><h3>ACHIEVEMENTS <span id="achCount" style="opacity:.6;font-weight:600"></span></h3><div id="achList"></div></div>
   <div class="esc">Press <kbd>Esc</kbd> to close</div>

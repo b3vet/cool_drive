@@ -1,7 +1,7 @@
 // CoolDrive service worker — network-first (always fresh when online, offline-capable).
 // Network-first avoids serving stale modules during development while still letting
 // the game work with no connection after the first visit.
-const CACHE = 'cooldrive-v4';
+const CACHE = 'cooldrive-v5';
 const CORE = [
   './', './index.html', './manifest.webmanifest',
   './icon-192.png', './icon-512.png', './icon-180.png',
@@ -14,6 +14,7 @@ const CORE = [
   './src/input.js', './src/camera.js', './src/effects.js', './src/scoring.js',
   './src/audio.js', './src/achievements.js', './src/hud.js', './src/main.js',
   './src/rand.js', './src/worldgen.js', './src/chunks.js',
+  './src/haptics.js', './src/trials.js', './src/weather.js',
 ];
 
 self.addEventListener('install', (e) => {

@@ -5,8 +5,8 @@
 // ============================================================================
 
 import * as THREE from 'three';
-import { PHYS, PRESETS, PROFILES, CARS, QUALITY, DEFAULT_QUALITY } from './config.js';
-import { createRenderer, createScene, applyPreset, onResize } from './scene.js';
+import { PHYS, PRESETS, PROFILES, CARS, QUALITY, DEFAULT_QUALITY, CYCLE, WEATHER } from './config.js';
+import { createRenderer, createScene, applyPreset, applyPresetBlend, onResize } from './scene.js';
 import { buildWorld, resolveCollisions, updateCones, updatePosts, applyWorldPreset } from './world.js';
 import { buildCar, applyCarVisual } from './car.js';
 import { createCarState, stepPhysics, snapshot, snapshotInto } from './physics.js';
@@ -17,6 +17,9 @@ import { createScoring } from './scoring.js';
 import { createHUD } from './hud.js';
 import { createAudio } from './audio.js';
 import { createAchievements } from './achievements.js';
+import { createHaptics } from './haptics.js';
+import { createTrials } from './trials.js';
+import { createWeather } from './weather.js';
 
 const el = (id) => document.getElementById(id);
 const hex = (c) => '#' + c.toString(16).padStart(6, '0');
@@ -76,8 +79,19 @@ const hud = createHUD();
 const input = createInput();
 const isMobile = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 if (isMobile) document.body.classList.add('mobile');
+const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const haptics = createHaptics(isNative); // native-only; no-ops on web
 const scoring = createScoring();
 const effects = createEffects(ctx.scene);
+effects.setAccent(ctx.preset.neon);
+const trials = createTrials({ scene: ctx.scene, streamer: world.streamer, scoring, hud, onComplete: () => { ringRunTotal += 1; } });
+const weather = createWeather(ctx.scene);
+
+// compass helpers
+const LM_ICON = { circuit: '🏁', town: '🌃', slalom: '⛳', skidpad: '🅿️', park: '🛝', gate: '⛩️', lookout: '🗼' };
+const fmtDist = (m) => (m >= 1000 ? (m / 1000).toFixed(1) + 'km' : Math.round(m) + 'm');
+let lastRegionKey = null;
+const regionSeen = new Set();
 
 // ---- car (rebuilt on selection) -------------------------------------------
 let selectedCarIndex = 0;
@@ -109,12 +123,13 @@ const carState = createCarState(0, 0, 0);
 const SPAWN = { x: 40, z: -30, heading: 2.0 };
 
 // ---- tuning: mode profile + car multipliers -------------------------------
+let wetMul = 1; // 1 dry, WEATHER.gripMul while raining (composed from base here)
 function applyTuning() {
   const p = PROFILES[mode];
   const c = CARS[selectedCarIndex];
-  PHYS.gripNormal = p.gripNormal * c.gripMul;
-  PHYS.gripDrift = p.gripDrift * c.gripMul;
-  PHYS.handbrakeGrip = p.handbrakeGrip * c.gripMul;
+  PHYS.gripNormal = p.gripNormal * c.gripMul * wetMul;
+  PHYS.gripDrift = p.gripDrift * c.gripMul * wetMul;
+  PHYS.handbrakeGrip = p.handbrakeGrip * c.gripMul * wetMul;
   PHYS.kAssist = p.kAssist;
   PHYS.driftSlipFactor = p.driftSlipFactor;
   PHYS.driftYawMul = p.driftYawMul;
@@ -166,6 +181,7 @@ function startGame() {
   document.body.classList.add('playing'); // triggers the one-time zone-hint fade
   el('startScreen').classList.add('hidden');
   applyTuning();
+  rollWeather(); // roll this session's weather (clear / rain / surprise)
   ach.event('car', CARS[selectedCarIndex].id);
   clock.start();
   clock.getDelta();
@@ -189,14 +205,65 @@ function resetCar() {
 }
 
 function cyclePreset() {
+  audio.sfx.ui();
+  if (autoCycle) { cycleT = (Math.floor(cycleT) + 1) % presetOrder.length; return; } // jump to next keyframe
   presetIdx = (presetIdx + 1) % presetOrder.length;
   const key = presetOrder[presetIdx];
   const p = applyPreset(ctx, renderer, key);
   applyWorldPreset(world, p);
   setAccent(p.neon);
+  effects.setAccent(p.neon);
   el('presetName').textContent = p.name;
+  renderer.shadowMap.needsUpdate = true; // the sun jumped — refresh shadows now
   if (key === 'night') ach.event('night');
-  audio.sfx.ui();
+}
+
+// ---- auto day/night cycle --------------------------------------------------
+let autoCycle = true;
+try { autoCycle = (localStorage.getItem('cooldrive.autocycle') || '1') !== '0'; } catch (e) {}
+let cycleT = 0, cycleAcc = 0;
+function updateCycle(dt) {
+  if (!autoCycle) return;
+  cycleT += dt / CYCLE.secondsPerLeg;
+  while (cycleT >= presetOrder.length) cycleT -= presetOrder.length;
+  const i = Math.floor(cycleT), t = cycleT - i;
+  const bl = applyPresetBlend(ctx, renderer, presetOrder[i], presetOrder[(i + 1) % presetOrder.length], t);
+  world.setNight(bl.night); // smooth light fade every frame
+  cycleAcc += dt;
+  if (cycleAcc >= 0.2) { // throttle accent / neon recolor / label
+    cycleAcc = 0;
+    setAccent(bl.neon); effects.setAccent(bl.neon); world.setNeon(bl.neon);
+    el('presetName').textContent = bl.name;
+    if (bl.night > 0.6) ach.event('night');
+    renderer.shadowMap.needsUpdate = true; // sun keeps moving
+  }
+}
+
+// ---- weather ---------------------------------------------------------------
+let weatherMode = 'surprise';
+try { weatherMode = localStorage.getItem('cooldrive.weather') || 'surprise'; } catch (e) {}
+let wet = false;
+function applyWeather(raining) {
+  wet = raining;
+  wetMul = raining ? WEATHER.gripMul : 1;
+  applyTuning();
+  world.setWet(raining ? 1 : 0);
+  effects.setWet(raining);
+  weather.setRain(raining);
+}
+function rollWeather() {
+  const raining = weatherMode === 'rain' || (weatherMode === 'surprise' && Math.random() < WEATHER.surpriseChance);
+  applyWeather(raining);
+}
+function setWeatherMode(m) { weatherMode = m; try { localStorage.setItem('cooldrive.weather', m); } catch (e) {} rollWeather(); }
+function setAutoCycle(on) { autoCycle = !!on; try { localStorage.setItem('cooldrive.autocycle', on ? '1' : '0'); } catch (e) {} }
+// wet-fog thickening — runs every frame regardless of auto-cycle. With the cycle ON the
+// blend just reset fog to its base this frame (multiply once); with it OFF, set from the
+// current preset's base × factor so it's idempotent and reverts cleanly when it dries.
+function applyFogWet() {
+  const f = ctx.scene.fog; if (!f) return;
+  if (autoCycle) { if (wet) { f.near *= WEATHER.fogPull; f.far *= WEATHER.fogPull; } }
+  else { const p = PRESETS[presetOrder[presetIdx]]; const k = wet ? WEATHER.fogPull : 1; f.near = p.fogNear * k; f.far = p.fogFar * k; }
 }
 
 // ---- car/mode selection (start screen + settings) -------------------------
@@ -269,6 +336,22 @@ if (qualitySel) {
   qualitySel.value = qualityKey;
   qualitySel.addEventListener('change', () => { setQuality(qualitySel.value); audio.sfx.ui(); });
 }
+const weatherSel = el('weatherSel');
+if (weatherSel) {
+  weatherSel.value = weatherMode;
+  weatherSel.addEventListener('change', () => { setWeatherMode(weatherSel.value); audio.sfx.ui(); });
+}
+const autoCycleEl = el('autoCycle');
+if (autoCycleEl) {
+  autoCycleEl.checked = autoCycle;
+  autoCycleEl.addEventListener('change', () => { setAutoCycle(autoCycleEl.checked); audio.sfx.ui(); });
+}
+const hapticsEl = el('hapticsToggle');
+if (hapticsEl) {
+  hapticsEl.checked = haptics.enabled;
+  hapticsEl.addEventListener('change', () => { haptics.setEnabled(hapticsEl.checked); if (hapticsEl.checked) haptics.impact('LIGHT'); });
+}
+if (isNative) document.body.classList.add('native');
 el('presetBtn').addEventListener('click', cyclePreset);
 
 const settingsEl = el('settings');
@@ -370,6 +453,9 @@ let bestCombo = 0;
 let trackDriftSec = 0;
 let procDriftSec = 0;
 let farthest = 0;
+let nearMissTotal = 0;
+let ringRunTotal = 0;
+let regionsSeen = 0;
 let procTownCheckAcc = 0;
 let lastFrameTime = 0;
 
@@ -388,6 +474,9 @@ function frame(now) {
   if (input.consumePressed('escape')) toggleSettings();
   if (input.consumePressed('m')) { const m = audio.toggleMute(); el('radioMute').textContent = m ? '🔇' : '🔊'; }
 
+  updateCycle(dt); // auto day/night lerp (runs even on the start screen) — before trackSun
+  applyFogWet(); // wet-weather fog thickening (works with cycle on or off)
+
   let crashed = false;
   let coneHits = 0;
   let postHits = 0;
@@ -402,7 +491,8 @@ function frame(now) {
       if (col.crash) { scoring.fail(); crashed = true; }
       coneHits += col.cones;
       postHits += col.posts;
-      scoring.step(carState, PHYS.STEP);
+      nearMissTotal += col.nearMisses;
+      scoring.step(carState, PHYS.STEP, col); // col carries near-miss shaves this substep
       snapshotInto(curr, carState);
       acc -= PHYS.STEP;
       steps++;
@@ -423,17 +513,36 @@ function frame(now) {
     if (carState.drifting && carState.speed > PHYS.minDriftSpeed && world.onProcCircuit(carState.x, carState.z)) {
       procDriftSec += dt;
     }
+    // drive through a gate arch → a boost top-up (latches once per visit)
+    if (world.onProcGate(carState.x, carState.z)) { carState.boost = Math.min(1, carState.boost + 0.3); audio.sfx.ui(); haptics.impact('LIGHT'); }
     procTownCheckAcc += dt;
     if (procTownCheckAcc >= 0.25) { // scanning every chunk is O(records) — throttle to 4 Hz
       procTownCheckAcc = 0;
       if (world.onProcTown(carState.x, carState.z)) ach.event('proctown');
+      // compass: home + nearest landmarks
+      const shift = world.streamer.shiftTotal;
+      const targets = [];
+      const hd = world.homeDist(carState.x, carState.z);
+      if (hd > 500) targets.push({ icon: '⌂', dist: fmtDist(hd), rx: -shift.x, rz: -shift.z });
+      for (const l of world.nearestLandmarks(carState.x, carState.z, 3)) targets.push({ icon: LM_ICON[l.kind] || '◆', dist: fmtDist(l.d), rx: l.rx, rz: l.rz });
+      hud.setCompass(targets);
+      // region discovery toast
+      const reg = world.regionAt(carState.x, carState.z);
+      if (reg.key !== lastRegionKey) {
+        lastRegionKey = reg.key;
+        if (!regionSeen.has(reg.key)) {
+          regionSeen.add(reg.key); regionsSeen = regionSeen.size;
+          if (regionsSeen > 1 && reg.name !== 'Home Turf') hud.toast({ icon: '🧭', name: reg.name, desc: 'New region discovered' }, 'NEW REGION', 'region');
+        }
+      }
     }
-    ach.update({ score: scoring.st.score, bestCombo, longestDrift: scoring.st.longestDrift, topSpeed, distance, trackDriftTime: trackDriftSec, procDriftTime: procDriftSec, farthest });
+    ach.update({ score: scoring.st.score, bestCombo, longestDrift: scoring.st.longestDrift, topSpeed, distance, trackDriftTime: trackDriftSec, procDriftTime: procDriftSec, farthest, nearMisses: nearMissTotal, bestLinks: scoring.st.bestLinks, ringRuns: ringRunTotal, regionsSeen });
   }
 
   // stream chunks around the car + maybe rebase the origin. Runs AFTER physics and
   // BEFORE interpolation/camera so a rebase shift is atomic within the frame.
   world.update(carState, dt);
+  if (running) trials.update(carState, dt); // ring time-trials on wild circuits
 
   // interpolate render transform
   const alpha = Math.min(acc / PHYS.STEP, 1);
@@ -450,6 +559,7 @@ function frame(now) {
   updateCones(world, dt);
   updatePosts(world, dt);
   world.updateAtmosphere(ctx.camera.position, dt);
+  weather.update(ctx.camera.position, dt);
   car.tlMat.emissiveIntensity = cmd.brake || cmd.handbrake ? 2.4 : 1.0;
 
   // audio
@@ -462,23 +572,31 @@ function frame(now) {
   const bankedAmt = scoring.st.justBanked;
   const bankedMult = scoring.st.justBankedMult;
   const isNewBest = scoring.st.justBest > 0;
+  const nearMissAmt = scoring.st.justNearMiss;
+  const linkAmt = scoring.st.justLink;
   hud.update(scoring.st, carState, dt);
 
-  // event-driven audio + achievements
+  // event-driven audio + haptics + achievements
   if (bankedAmt > 0) {
     audio.sfx.combo(bankedMult);
     ach.event('drift');
-    if (isNewBest) audio.sfx.best();
+    haptics.impact(isNewBest ? 'MEDIUM' : 'LIGHT');
+    if (isNewBest) { audio.sfx.best(); haptics.notify('SUCCESS'); }
   }
-  if (crashed) { audio.sfx.hit(); ach.event('crash'); }
+  if (nearMissAmt > 0) { audio.sfx.ui(); haptics.impact('LIGHT'); } // CLOSE SHAVE tick
+  if (linkAmt > 0) haptics.impact('LIGHT');
+  if (crashed) { audio.sfx.hit(); ach.event('crash'); haptics.impact('HEAVY'); }
   for (let i = 0; i < coneHits; i++) ach.event('cone');
   if (coneHits || postHits) audio.sfx.ui();
-  if (carState.boosting && !wasBoosting) { audio.sfx.boost(); ach.event('boost'); }
+  if (carState.boosting && !wasBoosting) { audio.sfx.boost(); ach.event('boost'); haptics.impact('MEDIUM'); }
+  if (carState.boosting !== wasBoosting) document.body.classList.toggle('boosting', carState.boosting); // speed lines
   wasBoosting = carState.boosting;
   drainAchievements();
 
-  // throttled shadow update (re-render the shadow map only every Nth frame)
-  if (++shadowTick >= shadowEvery) { renderer.shadowMap.needsUpdate = true; shadowTick = 0; }
+  // shadow update: normally throttled to every Nth frame, but forced immediately when
+  // the streamer signals it changed the scene (chunk activated/unloaded, or a rebase) —
+  // otherwise fresh casters render against a stale shadow map for a frame or two.
+  if (world.consumeShadowDirty() || ++shadowTick >= shadowEvery) { renderer.shadowMap.needsUpdate = true; shadowTick = 0; }
   renderer.render(ctx.scene, ctx.camera);
   updateHud(dt); // dev perf overlay (read renderer.info AFTER the render)
 }
@@ -488,7 +606,6 @@ window.__game = { carState, scoring, PHYS, input, world, ach, audio, ctx, render
 
 buildStartUI();
 // these hints are Safari/web-only — never show them inside the native (Capacitor) app
-const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 if (!isNative && isMobile && !window.isSecureContext) { const w = el('secureWarn'); if (w) w.style.display = 'block'; }
 // (Add-to-Home is no longer required — portrait now renders the game rotated to
 // landscape and fills the screen, so we don't nag about fullscreen.)
@@ -506,6 +623,7 @@ world.setRebase((dx, dz) => {
   render.x -= dx; render.z -= dz;
   if (cam) cam.shift(-dx, -dz);
   effects.shift(-dx, -dz);
+  hud.shiftCompass(-dx, -dz); // cached compass targets are render coords too
 });
 world.setQuality(qualityKey); // apply the initial streaming radius
 

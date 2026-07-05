@@ -156,11 +156,74 @@ export function landmarkFor(seed, cx, cz) {
   if (homeReserved(cx, cz)) return null; // never in the home region
   const kindRoll = hash01(seed, lx, lz, SALT.LANDMARK_KIND);
   let kind;
-  if (kindRoll < 0.35) kind = 'circuit';
-  else if (kindRoll < 0.65) kind = 'town';
-  else if (kindRoll < 0.85) kind = 'slalom';
-  else kind = 'skidpad';
+  if (kindRoll < 0.28) kind = 'circuit';
+  else if (kindRoll < 0.52) kind = 'town';
+  else if (kindRoll < 0.68) kind = 'slalom';
+  else if (kindRoll < 0.80) kind = 'skidpad';
+  else if (kindRoll < 0.87) kind = 'park';      // banked stunt park
+  else if (kindRoll < 0.94) kind = 'gate';      // neon arch over a road
+  else kind = 'lookout';                         // tall beacon tower (navigation anchor)
   return { kind, cx, cz };
+}
+
+// Deterministic drift-circuit centreline for a landmark chunk — a closed polyline in
+// ABSOLUTE coords. Depends only on (cx,cz), so chunks.js (geometry) and trials.js (ring
+// placement) can regenerate the SAME path independently with no stored data.
+const CIRCUIT_R = 70;
+export function circuitPath(cx, cz) {
+  const cxC = cx * CS + CS / 2, czC = cz * CS + CS / 2;
+  const pts = [], N = 9;
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    const rr = CIRCUIT_R * (0.75 + 0.25 * Math.sin(i * 1.7 + cx));
+    pts.push({ x: cxC + Math.cos(a) * rr, z: czC + Math.sin(a) * rr });
+  }
+  return { center: { x: cxC, z: czC }, r: CIRCUIT_R, points: pts };
+}
+
+// Nearest landmarks to an ABSOLUTE point, scanning LM cells outward (bounded). Pure +
+// cheap (a couple of hashes per cell) — safe to call a few times a second for the HUD
+// compass. Returns up to k {kind, x, z, cx, cz} sorted by distance.
+export function nearestLandmarks(seed, cx, cz, k = 3, cellRadius = 3) {
+  const lcx = Math.floor(cx / LM_CELL), lcz = Math.floor(cz / LM_CELL);
+  const px = cx * CS + CS / 2, pz = cz * CS + CS / 2; // approx car position (chunk centre)
+  const found = [];
+  for (let dlx = -cellRadius; dlx <= cellRadius; dlx++) {
+    for (let dlz = -cellRadius; dlz <= cellRadius; dlz++) {
+      const lx = lcx + dlx, lz = lcz + dlz;
+      if (hash01(seed, lx, lz, SALT.LANDMARK) > 0.55) continue;
+      const r = cellRng(seed, lx, lz, SALT.LANDMARK + 1);
+      const hostCx = lx * LM_CELL + Math.floor(r() * LM_CELL);
+      const hostCz = lz * LM_CELL + Math.floor(r() * LM_CELL);
+      if (homeReserved(hostCx, hostCz)) continue;
+      const lm = landmarkFor(seed, hostCx, hostCz);
+      if (!lm) continue;
+      const x = hostCx * CS + CS / 2, z = hostCz * CS + CS / 2;
+      found.push({ kind: lm.kind, x, z, cx: hostCx, cz: hostCz, d: Math.hypot(x - px, z - pz) });
+    }
+  }
+  found.sort((a, b) => a.d - b.d);
+  return found.slice(0, k);
+}
+
+// Deterministic name for the ~2 km region (super-cell) containing a chunk. Adjective +
+// biome-keyed noun, e.g. "Vermillion Flats", "Cobalt Woods". Home region is special.
+const REGION_CELL = 8; // 8 chunks ≈ 2 km
+const REGION_ADJ = ['Vermillion', 'Cobalt', 'Ashen', 'Amber', 'Crimson', 'Onyx', 'Ivory',
+  'Jade', 'Dusty', 'Silent', 'Golden', 'Violet', 'Rust', 'Pale', 'Neon', 'Hollow',
+  'Frost', 'Ember', 'Slate', 'Copper', 'Wild', 'Lonesome', 'Static', 'Marigold'];
+const BIOME_NOUN = { plain: 'Flats', meadow: 'Fields', forest: 'Woods', rock: 'Ridge' };
+export function regionKey(cx, cz) { return Math.floor(cx / REGION_CELL) + ',' + Math.floor(cz / REGION_CELL); }
+export function regionName(seed, cx, cz) {
+  const rx = Math.floor(cx / REGION_CELL), rz = Math.floor(cz / REGION_CELL);
+  const cxC = (rx * REGION_CELL + REGION_CELL / 2) * CS, czC = (rz * REGION_CELL + REGION_CELL / 2) * CS;
+  // any region cell that overlaps the home reservation reads as home
+  const rxMin = rx * REGION_CELL, rxMax = rxMin + REGION_CELL - 1;
+  const rzMin = rz * REGION_CELL, rzMax = rzMin + REGION_CELL - 1;
+  if (rxMin <= CHUNK.homeMax.cx && rxMax >= CHUNK.homeMin.cx && rzMin <= CHUNK.homeMax.cz && rzMax >= CHUNK.homeMin.cz) return 'Home Turf';
+  const adj = REGION_ADJ[Math.floor(hash01(seed, rx, rz, SALT.REGION) * REGION_ADJ.length)];
+  const noun = BIOME_NOUN[biomeAt(seed, cxC, czC)] || 'Reach';
+  return adj + ' ' + noun;
 }
 
 // ---- the full chunk description -------------------------------------------

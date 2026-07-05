@@ -19,6 +19,23 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const MODEL_VER = '4';
 const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'v=' + MODEL_VER;
 
+// Twin additive boost flames at the rear (+Z). Parented to the chassis (exists
+// synchronously even for async GLB bodies). Driven by applyCarVisual on boost.
+function makeFlames(def) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color: 0x8fd8ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+  const geo = new THREE.ConeGeometry(0.17, 0.95, 8);
+  const rearZ = (def.bodyL || 4) / 2 + 0.26, y = (def.ride || 0.35) + 0.06;
+  for (const sx of [-0.42, 0.42]) {
+    const f = new THREE.Mesh(geo, mat);
+    f.position.set(sx, y, rearZ);
+    f.rotation.x = Math.PI / 2; // apex points backward (+Z)
+    group.add(f);
+  }
+  group.visible = false;
+  return { group, mat };
+}
+
 // Load a .glb/.gltf model as the car body. Auto-centres, scales to bodyL, and
 // orients with def.modelRotation. Used when a car def has a `modelUrl`.
 function buildGLBCar(def) {
@@ -86,10 +103,13 @@ function buildGLBCar(def) {
   car.add(lookTarget);
   const hw = (def.bodyW || 1.85) / 2 + 0.05;
   const wbR = PHYS.wheelbase / 2 + 0.3;
+  const flames = makeFlames(def);
+  chassis.add(flames.group);
   return {
     def, group: car, chassis, bodyMat: null,
     steerGroups, frontSpinners, rearSpinners, tails: [],
     tlMat: new THREE.MeshBasicMaterial(), // dummy so the brake-light wiring is harmless
+    flameGroup: flames.group, flameMat: flames.mat, _flame: 0,
     cameraGoal, lookTarget, frontAngle: 0, rearAngle: 0, prevFwd: 0,
     rearOffsets: [new THREE.Vector3(-hw, 0, wbR), new THREE.Vector3(hw, 0, wbR)],
   };
@@ -295,6 +315,8 @@ export function buildCar(def) {
   const lookTarget = new THREE.Object3D();
   car.add(lookTarget);
 
+  const flames = makeFlames(def);
+  chassis.add(flames.group);
   return {
     def,
     group: car,
@@ -305,6 +327,9 @@ export function buildCar(def) {
     rearSpinners,
     tails,
     tlMat,
+    flameGroup: flames.group,
+    flameMat: flames.mat,
+    _flame: 0,
     cameraGoal,
     lookTarget,
     frontAngle: 0,
@@ -341,4 +366,18 @@ export function applyCarVisual(car, render, state, input, dt) {
   const k = clamp(VIS.bodyLerp * dt, 0, 1);
   car.chassis.rotation.z += (targetRoll - car.chassis.rotation.z) * k;
   car.chassis.rotation.x += (targetPitch - car.chassis.rotation.x) * k;
+
+  // boost flames: ease in/out, flicker length + opacity while lit
+  if (car.flameGroup) {
+    const target = state.boosting ? 1 : 0;
+    car._flame += (target - car._flame) * Math.min(dt * 14, 1);
+    const fl = car._flame;
+    if (fl > 0.02) {
+      car.flameGroup.visible = true;
+      car.flameMat.opacity = fl * (0.5 + Math.random() * 0.4);
+      car.flameGroup.scale.set(1, 1, 0.6 + fl * (0.7 + Math.random() * 0.6));
+    } else {
+      car.flameGroup.visible = false;
+    }
+  }
 }

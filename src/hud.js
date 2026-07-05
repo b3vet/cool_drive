@@ -17,14 +17,29 @@ export function createHUD() {
   const boostFill = el('boostFill');
   const driftFloat = el('driftFloat');
   const flash = el('bankFlash');
+  const nearFlash = el('nearFlash');
+  const linkTag = el('linkTag');
+  const awardFlash = el('awardFlash');
   const celebrateEl = el('celebrate');
   const celebrateBig = celebrateEl.querySelector('.big');
   const celebrateSub = celebrateEl.querySelector('.sub');
   const toasts = el('toasts');
   const radioName = el('radioName');
   const radioPower = el('radioPower');
+  const compassEl = el('compass');
 
   let comboPulse = 0;
+  let compassItems = []; // { arr: <el>, rx, rz } — render-coord targets
+
+  // rebuild the compass chip row (called at a few Hz); arrows are rotated per-frame
+  function setCompass(targets) {
+    if (!compassEl) return;
+    compassEl.innerHTML = targets.map((t) => `<div class="cmp"><span class="arr">↑</span><span>${t.icon}</span><span class="d">${t.dist}</span></div>`).join('');
+    const arrs = compassEl.querySelectorAll('.arr');
+    compassItems = targets.map((t, i) => ({ arr: arrs[i], rx: t.rx, rz: t.rz }));
+  }
+  // keep cached targets valid across a floating-origin rebase (they're render coords)
+  function shiftCompass(dx, dz) { for (const it of compassItems) { it.rx += dx; it.rz += dz; } }
 
   function celebrate(big, sub, color) {
     celebrateBig.textContent = big;
@@ -77,6 +92,33 @@ export function createHUD() {
       st.justFailed = false;
     }
 
+    // link counter (direction transitions within the current chain)
+    if (linkTag) {
+      if (st.active && st.links > 0) { linkTag.classList.add('show'); linkTag.textContent = 'LINK ×' + st.links; }
+      else linkTag.classList.remove('show');
+      if (st.justLink > 0) { linkTag.classList.remove('pop'); void linkTag.offsetWidth; linkTag.classList.add('pop'); comboPulse = 0.25; st.justLink = 0; }
+    }
+    // near-miss shave pop
+    if (st.justNearMiss > 0) {
+      if (nearFlash) { nearFlash.classList.remove('play'); void nearFlash.offsetWidth; nearFlash.classList.add('play'); }
+      st.justNearMiss = 0;
+    }
+    // direct award (ring trial etc.)
+    if (st.justAward > 0) {
+      if (awardFlash) { awardFlash.textContent = '+' + fmt(st.justAward); awardFlash.classList.remove('play'); void awardFlash.offsetWidth; awardFlash.classList.add('play'); }
+      st.justAward = 0;
+    }
+
+    // compass arrows point from the car toward each target (screen up = forward)
+    if (compassItems.length) {
+      const h = carState.heading, ch = Math.cos(h), sh = Math.sin(h);
+      for (const it of compassItems) {
+        const dx = it.rx - carState.x, dz = it.rz - carState.z;
+        const lx = dx * ch - dz * sh, lz = dx * sh + dz * ch;
+        it.arr.style.transform = `rotate(${Math.atan2(lx, -lz).toFixed(3)}rad)`;
+      }
+    }
+
     speed.textContent = Math.round(Math.abs(carState.forwardSpeed) * 3.6);
     boostFill.style.width = (carState.boost * 100).toFixed(0) + '%';
     boostFill.classList.toggle('ready', carState.boost > 0.99);
@@ -86,11 +128,12 @@ export function createHUD() {
 
   function pulseCombo() { comboPulse = 0.25; }
 
-  // achievement toast
-  function toast(a) {
+  // toast — achievements by default; region discovery reuses it with a different
+  // kicker + variant class (see index.html .toast.region)
+  function toast(a, kicker = 'ACHIEVEMENT', variant = '') {
     const div = document.createElement('div');
-    div.className = 'toast';
-    div.innerHTML = `<div class="ic">${a.icon}</div><div><div class="t1">ACHIEVEMENT</div><div class="t2">${a.name}</div><div class="t3">${a.desc}</div></div>`;
+    div.className = 'toast' + (variant ? ' ' + variant : '');
+    div.innerHTML = `<div class="ic">${a.icon}</div><div><div class="t1">${kicker}</div><div class="t2">${a.name}</div><div class="t3">${a.desc || ''}</div></div>`;
     toasts.appendChild(div);
     setTimeout(() => div.remove(), 5000);
   }
@@ -111,5 +154,5 @@ export function createHUD() {
       .join('');
   }
 
-  return { update, pulseCombo, celebrate, toast, setRadio, renderAchievements };
+  return { update, pulseCombo, celebrate, toast, setRadio, setCompass, shiftCompass, renderAchievements };
 }

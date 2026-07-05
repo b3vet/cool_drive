@@ -7,7 +7,7 @@
 // ============================================================================
 
 import * as THREE from 'three';
-import { WORLD, CHUNK } from './config.js';
+import { WORLD, CHUNK, SCORE } from './config.js';
 import { createStreamer } from './chunks.js';
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -371,7 +371,7 @@ function buildHomeRegion(scene, preset) {
   const poleGeo = new THREE.CylinderGeometry(0.16, 0.22, 6.6, 6);
   const headGeo = new THREE.BoxGeometry(1.6, 0.4, 0.8);
   const poolGeo = new THREE.CircleGeometry(15, 24);
-  const trackLightHeads = [], trackLightPools = [], trackPointLights = [];
+  const trackLightHeads = [], trackLightPools = [], lightAnchors = [];
   const nPoles = 10;
   for (let k = 0; k < nPoles; k++) {
     const si = Math.floor((k + 0.25) / nPoles * nT);
@@ -394,18 +394,17 @@ function buildHomeRegion(scene, preset) {
     pool.position.set(c.x + perp.x * (TW / 2 - 4), 0.07, c.z + perp.z * (TW / 2 - 4));
     group.add(pool);
     trackLightPools.push(poolMat);
-    if (k % 2 === 0) { // a cheap shadowless point light on every other pole
-      const pl = new THREE.PointLight(0xffe7b5, 0, 85, 2);
-      pl.position.set(hx, 6.2, hz);
-      group.add(pl);
-      trackPointLights.push(pl);
-    }
+    // Every other pole is a lamp ANCHOR (absolute coords). The 5 real PointLights now
+    // live in the streamer's single shared pool, aimed at the nearest of these anchors
+    // + any active procedural circuit — so the world-wide PointLight count stays at 5.
+    if (k % 2 === 0) lightAnchors.push({ x: hx, y: 6.2, z: hz });
   }
-  // toggled by the time-of-day preset (on for Neon Night)
-  function setTrackLights(on) {
-    for (const m of trackLightHeads) m.emissiveIntensity = on ? 3.0 : 0;
-    for (const m of trackLightPools) m.opacity = on ? 0.6 : 0;
-    for (const l of trackPointLights) l.intensity = on ? 26 : 0;
+  // Time-of-day dimmer (0..1, or a boolean). Drives only the emissive lamp heads +
+  // ground pools; the actual PointLights are the streamer's job (setNightLevel).
+  function setTrackLights(level) {
+    const lvl = level === true ? 1 : level === false ? 0 : level;
+    for (const m of trackLightHeads) m.emissiveIntensity = 3.0 * lvl;
+    for (const m of trackLightPools) m.opacity = 0.6 * lvl;
   }
 
   const driftTrack = {
@@ -666,19 +665,28 @@ function buildHomeRegion(scene, preset) {
     dustGeo.attributes.position.needsUpdate = true;
   }
 
+  // wet-road look (0..1): road/track get glossier + darker, dust fades out. asphalt &
+  // trackMat are shared with the streamer, so procedural roads turn wet too.
+  function setWet(t) {
+    asphalt.roughness = 0.95 - 0.42 * t; asphalt.metalness = 0.32 * t;
+    trackMat.roughness = 0.92 - 0.42 * t; trackMat.metalness = 0.32 * t;
+    dustMat.opacity = 0.3 * (1 - t);
+  }
+
   return {
     group,
     colliders: { solids, boxes, walls, postList, cones }, // ABSOLUTE coords, bucketed by the streamer
     postsMesh: posts,
     driftTrack, onDriftTrack, // absolute-space
     townCenter: { x: townX, z: townZ }, // absolute
-    setTrackLights, updateAtmosphere,
+    lightAnchors, // static lamp positions (absolute) for the streamer's shared light pool
+    setTrackLights, setWet, updateAtmosphere,
     postMat, edgeMat, trackWallTopMat, // for applyWorldPreset (shared with streamed content)
     shared: {
       roadMat: asphalt, edgeMat, dashMat,
       trunkGeo, trunkMat, canopyGeo: topGeo, canopyMat: leafMat,
       rockGeo, rockMat, bushGeo, bushMat,
-      buildingGeo, buildingMat,
+      buildingGeo, buildingMat, winMat,
       trackMat, wallMat, wallCapMat: trackWallTopMat,
       coneGeo, coneMat, padGeo,
     },
@@ -714,12 +722,26 @@ export function buildWorld(scene, preset) {
     get townCenter() { return { x: home.townCenter.x - shift.x, z: home.townCenter.z - shift.z }; },
     onProcCircuit: (x, z) => streamer.procCircuitAt(x, z),
     onProcTown: (x, z) => streamer.procTownAt(x, z),
+    onProcGate: (x, z) => streamer.procGateAt(x, z), // fires once per gate pass (grants boost)
+    nearestLandmarks: (x, z, k) => streamer.nearestLandmarks(x, z, k), // render coords → compass targets
+    regionAt: (x, z) => streamer.regionAt(x, z),
     // absolute distance from the home origin (render -> absolute via + shift)
     homeDist: (x, z) => Math.hypot(x + shift.x, z + shift.z),
-    setProcNight: (on) => streamer.setProcNight(on), // light procedural circuits at night
     nearestRoad: (x, z) => streamer.nearestRoad(x, z), // render coords in/out (far-from-home respawn)
     updateAtmosphere: home.updateAtmosphere,
+    // Night level 0..1 (or boolean): dims the home lamp heads AND the shared PointLight
+    // pool together. Used by applyWorldPreset and the auto day/night cycle.
+    setNight: (level) => { home.setTrackLights(level); streamer.setNightLevel(level); },
     setTrackLights: home.setTrackLights,
+    // recolor the shared neon materials (kerbs/posts/track caps) — used by the day/night lerp
+    setNeon: (hex) => {
+      home.postMat.color.setHex(hex); home.postMat.emissive.setHex(hex);
+      if (home.edgeMat) { home.edgeMat.color.setHex(hex); home.edgeMat.emissive.setHex(hex); }
+      if (home.trackWallTopMat) { home.trackWallTopMat.color.setHex(hex); home.trackWallTopMat.emissive.setHex(hex); }
+    },
+    consumeShadowDirty: () => streamer.consumeShadowDirty(),
+    // wet-road look (0..1): dulls road/track sheen, darkens ground, hides dust
+    setWet: (t) => home.setWet && home.setWet(t),
     setQuality: (q) => streamer.setQuality(q),
     setRebase: (fn) => streamer.setRebase(fn),
     setSeed: (s) => streamer.setSeed(s),
@@ -732,9 +754,19 @@ export function buildWorld(scene, preset) {
 // RENDER coords, refilled by the streamer). Endless — no world boundary. Returns
 // true only on a hard slam. The result is a pooled object (read it before the next
 // call) so the 120/s collision pass allocates nothing.
-const _colOut = { crash: false, cones: 0, posts: 0 };
+const _colOut = { crash: false, cones: 0, posts: 0, nearMisses: 0 };
 export function resolveCollisions(state, world) {
   let hardHit = false;
+  let nm = 0; // near-miss shaves this substep
+
+  // near-miss band: while drifting fast, sliding CLOSE to a solid (but not hitting it)
+  // scores a bonus. Per-object latch (_nm) so one shave counts once until the car pulls
+  // clear; the active arrays are rebuilt each gather so latches self-reset on chunk-cross.
+  // The gate MUST be a subset of scoring.step's `valid` (drifting + slip>minSlipDeg +
+  // speed) or a shave gets latched-but-never-scored and can't be re-earned that pass.
+  const nmActive = state.drifting && state.speed > SCORE.nearMissMinSpeed &&
+    Math.abs(state.slip) * 57.29577951 > SCORE.minSlipDeg;
+  const nmBand = SCORE.nearMissBand, nmClear = nmBand * 1.8;
 
   // solid objects (trees, rocks, buildings, hills): push the car out, kill the
   // velocity component going INTO the object, bounce a little, scrub speed.
@@ -746,6 +778,7 @@ export function resolveCollisions(state, world) {
     const rr = o.r + carR;
     const d2 = dx * dx + dz * dz;
     if (d2 < rr * rr) {
+      o._nm = false; // touching, not shaving
       const d = Math.max(Math.sqrt(d2), 0.001);
       const nx = dx / d;
       const nz = dz / d;
@@ -759,6 +792,10 @@ export function resolveCollisions(state, world) {
       }
       state.vx *= 0.82; // scrub speed on contact
       state.vz *= 0.82;
+    } else if (nmActive) {
+      const band = rr + nmBand;
+      if (d2 < band * band) { if (!o._nm) { o._nm = true; nm++; } }
+      else if (d2 > (rr + nmClear) * (rr + nmClear)) o._nm = false;
     }
   }
 
@@ -771,7 +808,15 @@ export function resolveCollisions(state, world) {
     const clz = clamp(lz, -b.hd, b.hd);
     const ox = lx - clx, oz = lz - clz;
     const d2 = ox * ox + oz * oz;
-    if (d2 >= carR * carR) continue;
+    if (d2 >= carR * carR) {
+      if (nmActive) {
+        const band = carR + nmBand;
+        if (d2 < band * band) { if (!b._nm) { b._nm = true; nm++; } }
+        else if (d2 > (carR + nmClear) * (carR + nmClear)) b._nm = false;
+      }
+      continue;
+    }
+    b._nm = false; // colliding
     let nlx, nlz, pen;
     if (d2 > 1e-6) {
       const d = Math.sqrt(d2);
@@ -826,6 +871,7 @@ export function resolveCollisions(state, world) {
     const wdx = state.x - px, wdz = state.z - pz;
     const wd2 = wdx * wdx + wdz * wdz;
     if (wd2 < half * half) {
+      w._nm = false; // scraping the wall, not shaving
       const d = Math.max(Math.sqrt(wd2), 0.001);
       const nx = wdx / d, nz = wdz / d;
       state.x = px + nx * half; // push out to the wall surface
@@ -838,6 +884,10 @@ export function resolveCollisions(state, world) {
       }
       state.vx *= 0.88; // scrub some speed on contact
       state.vz *= 0.88;
+    } else if (nmActive) {
+      const band = half + nmBand;
+      if (wd2 < band * band) { if (!w._nm) { w._nm = true; nm++; } }
+      else if (wd2 > (half + nmClear) * (half + nmClear)) w._nm = false;
     }
   }
 
@@ -863,7 +913,7 @@ export function resolveCollisions(state, world) {
     }
   }
 
-  _colOut.crash = hardHit; _colOut.cones = coneHits; _colOut.posts = postHits;
+  _colOut.crash = hardHit; _colOut.cones = coneHits; _colOut.posts = postHits; _colOut.nearMisses = nm;
   return _colOut;
 }
 
@@ -903,18 +953,8 @@ export function updateCones(world, dt) {
 }
 
 export function applyWorldPreset(world, preset) {
-  world.postMat.color.setHex(preset.neon);
-  world.postMat.emissive.setHex(preset.neon);
-  if (world.edgeMat) {
-    world.edgeMat.color.setHex(preset.neon);
-    world.edgeMat.emissive.setHex(preset.neon);
-  }
-  if (world.ringMat) world.ringMat.color.setHex(preset.neon);
-  if (world.boundaryWallMat) world.boundaryWallMat.color.setHex(preset.neon);
-  if (world.trackWallTopMat) {
-    world.trackWallTopMat.color.setHex(preset.neon);
-    world.trackWallTopMat.emissive.setHex(preset.neon);
-  }
-  if (world.setTrackLights) world.setTrackLights(!!preset.night); // stadium lights on at night
-  if (world.setProcNight) world.setProcNight(!!preset.night); // procedural circuit lights follow the same toggle
+  if (world.setNeon) world.setNeon(preset.neon);
+  // preset.night is `true` on the night preset, a 0..1 float from the day/night blend,
+  // or undefined on day presets — normalise all three to a level
+  if (world.setNight) world.setNight(preset.night === true ? 1 : (preset.night || 0));
 }

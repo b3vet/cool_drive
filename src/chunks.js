@@ -11,7 +11,8 @@
 
 import * as THREE from 'three';
 import { CHUNK, WORLD } from './config.js';
-import { describeChunk } from './worldgen.js';
+import { describeChunk, circuitPath, nearestLandmarks as wgNearestLandmarks, regionName as wgRegionName, regionKey as wgRegionKey } from './worldgen.js';
+import { SALT } from './rand.js';
 
 const CS = CHUNK.size;
 const keyOf = (cx, cz) => ((cx + 0x8000) << 16) | (cz + 0x8000);
@@ -55,8 +56,10 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
     rock: makePool(shared.rockGeo, shared.rockMat, CHUNK.perChunkCaps.rocks, S, true),
     bush: makePool(shared.bushGeo, shared.bushMat, CHUNK.perChunkCaps.bushes, S, false),
     // town buildings come only from rare landmark chunks (<=1 per chunk, ~1 town per
-    // ~150 chunks) so a small fixed pool is safe here.
+    // ~150 chunks) so a small fixed pool is safe here. `band` = the emissive window
+    // strips that make a box read as a building (matches the authored home city).
     building: makePool(shared.buildingGeo, shared.buildingMat, CHUNK.perChunkCaps.buildings, 40, true),
+    band: makePool(shared.buildingGeo, shared.winMat, CHUNK.perChunkCaps.buildings, 40, false),
   };
   const checkout = (pool) => (pool.free.length ? pool.free.pop() : null);
   const checkin = (pool, m) => { m.count = 0; m.visible = false; if (m.parent) m.parent.remove(m); pool.free.push(m); };
@@ -66,30 +69,39 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
   // which never unload, keep their self-righting wobble). Populated at unloadChunk.
   const knockedCones = new Map();
 
-  // ---- procedural circuit night lighting: a shared pool of CHUNK.lightCap
-  // shadowless PointLights, always in the scene (constant light count → no shader
-  // recompiles), reassigned to the nearest active circuits and lit only at night.
-  const circuitLights = [];
+  // ---- night lighting: ONE shared pool of CHUNK.lightCap shadowless PointLights,
+  // created here (before renderer.compile) and NEVER added/removed afterward, so the
+  // world-wide PointLight count is a constant 5 (no mid-drive shader recompiles).
+  // Each tick the 5 lights are aimed at the nearest lit points — the home track's lamp
+  // anchors PLUS any active procedural circuit — and dimmed by a 0..1 nightLevel so the
+  // day/night cycle can fade them instead of popping.
+  const homeAnchors = (home && home.lightAnchors) || []; // absolute {x,y,z}, static on the home track
+  const nightLights = [];
   for (let i = 0; i < CHUNK.lightCap; i++) {
     const pl = new THREE.PointLight(0xffe7b5, 0, 95, 2);
     pl.position.set(0, 14, 0);
     scene.add(pl);
-    circuitLights.push(pl);
+    nightLights.push(pl);
   }
-  let nightOn = false, lightAcc = 0;
-  function assignCircuitLights(carX, carZ) {
-    const cs = [];
-    for (const rec of records.values()) if (rec.procCircuit) {
-      const rx = rec.procCircuit.x - shiftTotal.x, rz = rec.procCircuit.z - shiftTotal.z;
-      cs.push({ rx, rz, d: (rx - carX) ** 2 + (rz - carZ) ** 2 });
-    }
-    cs.sort((a, b) => a.d - b.d);
-    for (let i = 0; i < circuitLights.length; i++) {
-      const l = circuitLights[i];
-      if (nightOn && i < cs.length) { l.position.set(cs[i].rx, 14, cs[i].rz); l.intensity = 24; }
+  let nightLevel = 0, lightAcc = 0;
+  const _lightCand = []; // reused scratch (no per-tick alloc)
+  function assignLights(carX, carZ) {
+    _lightCand.length = 0;
+    for (const a of homeAnchors) { const rx = a.x - shiftTotal.x, rz = a.z - shiftTotal.z; _lightCand.push({ rx, ry: a.y, rz, d: (rx - carX) ** 2 + (rz - carZ) ** 2 }); }
+    for (const rec of records.values()) if (rec.procCircuit) { const rx = rec.procCircuit.x - shiftTotal.x, rz = rec.procCircuit.z - shiftTotal.z; _lightCand.push({ rx, ry: 14, rz, d: (rx - carX) ** 2 + (rz - carZ) ** 2 }); }
+    _lightCand.sort((a, b) => a.d - b.d);
+    const on = nightLevel > 0.01;
+    for (let i = 0; i < nightLights.length; i++) {
+      const l = nightLights[i];
+      if (on && i < _lightCand.length) { const c = _lightCand[i]; l.position.set(c.rx, c.ry, c.rz); l.intensity = 25 * nightLevel; }
       else l.intensity = 0;
     }
   }
+
+  // Set true whenever geometry enters/leaves the scene or the world rebases, so main.js
+  // can force a shadow-map refresh that frame (the throttle otherwise caches a stale map
+  // and freshly-activated chunks / post-rebase casters render shadowless for a frame).
+  let shadowDirty = false;
 
   // ---- active collision set (identity stable — resolveCollisions reads these)
   const active = { solids: [], boxes: [], walls: [], postList: [], cones: [] };
@@ -252,11 +264,9 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
     const cxC = ox + CS / 2, czC = oz + CS / 2;
     const grp = rec.group;
     if (desc.landmark.kind === 'circuit') {
-      // a small walled drift circuit (radius ~78m)
-      const pts = [], R = 70, N = 9;
-      const rr = (i) => R * (0.75 + 0.25 * Math.sin(i * 1.7 + rec.cx));
-      for (let i = 0; i < N; i++) { const a = (i / N) * Math.PI * 2; pts.push({ x: cxC + Math.cos(a) * rr(i), z: czC + Math.sin(a) * rr(i) }); }
-      const s = closedResample(pts);
+      // a small walled drift circuit — path from worldgen so trials.js can match it
+      const cp = circuitPath(rec.cx, rec.cz);
+      const s = closedResample(cp.points);
       const surf = new THREE.Mesh(ribbonGeo(s, ox, oz, 24, 0.03, true), shared.trackMat); surf.receiveShadow = true; grp.add(surf); disp.push(surf.geometry);
       for (const off of [-14.2, 14.2]) {
         const w = wallGeo(s, ox, oz, off, true);
@@ -265,14 +275,15 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
         grp.add(cap); disp.push(cap.geometry);
         for (const seg of w.segs) col.walls.push(seg);
       }
-      rec.procCircuit = { x: cxC, z: czC, r: R + 20 };
+      rec.procCircuit = { x: cp.center.x, z: cp.center.z, r: cp.r + 20 };
     } else if (desc.landmark.kind === 'town') {
-      const rng = mulcell(rec.seed, rec.cx, rec.cz, 0xabcd);
+      const rng = mulcell(rec.seed, rec.cx, rec.cz, SALT.TOWN_BUILD);
       const G = 4, CELL = 40, gh = (G - 1) / 2, rot = rng() * Math.PI;
       const cs = Math.cos(rot), sn = Math.sin(rot);
-      const bm = checkout(pools.building);
+      const bm = checkout(pools.building), band = checkout(pools.band);
       if (bm) {
-        poolMeshInit(bm, rec); let bi = 0;
+        poolMeshInit(bm, rec); if (band) poolMeshInit(band, rec);
+        let bi = 0;
         for (let gx = 0; gx < G; gx++) for (let gz = 0; gz < G; gz++) {
           if (rng() < 0.25 || bi >= bm.instanceMatrix.count) continue;
           const lx = (gx - gh) * CELL + (rng() - 0.5) * 10, lz = (gz - gh) * CELL + (rng() - 0.5) * 10;
@@ -281,12 +292,17 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
           dummy.position.set(wx - ox, bh / 2, wz - oz); dummy.rotation.set(0, rot, 0); dummy.scale.set(bw, bh, bd);
           dummy.updateMatrix(); bm.setMatrixAt(bi, dummy.matrix);
           bm.setColorAt(bi, tmpBuildingColor(rng));
+          if (band) { // a thin emissive window band near the top (matches the home city)
+            dummy.position.set(wx - ox, bh * 0.68, wz - oz); dummy.scale.set(bw * 1.01, bh * 0.1, bd * 1.01);
+            dummy.updateMatrix(); band.setMatrixAt(bi, dummy.matrix);
+          }
           col.boxes.push({ x: wx, z: wz, hw: bw / 2, hd: bd / 2, cos: cs, sin: sn });
           bi++;
         }
         bm.count = bi; bm.instanceMatrix.needsUpdate = true; if (bm.instanceColor) bm.instanceColor.needsUpdate = true;
         grp.add(bm);
-      }
+        if (band) { band.count = bi; band.instanceMatrix.needsUpdate = true; grp.add(band); }
+      } else if (band) { checkin(pools.band, band); } // building pool starved — don't strand the band
       rec.procTown = { x: cxC, z: czC };
     } else if (desc.landmark.kind === 'slalom') {
       const flat = knockedCones.get(rec.key); // cones the player already flattened here
@@ -297,9 +313,47 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
         if (flat && flat.has(i)) { cone.knocked = true; cone.knock = 1; c.rotation.z = 1.5; c.position.y = 0.5 - 0.12; }
         col.cones.push(cone);
       }
-    } else { // skidpad
+    } else if (desc.landmark.kind === 'skidpad') {
       const pad = new THREE.Mesh(new THREE.CircleGeometry(46, 40), shared.trackMat); pad.rotation.x = -Math.PI / 2; pad.position.set(cxC - ox, 0.02, czC - oz); pad.receiveShadow = true; grp.add(pad); disp.push(pad.geometry);
       const ring = new THREE.Mesh(new THREE.TorusGeometry(46, 0.5, 6, 48), shared.edgeMat); ring.rotation.x = -Math.PI / 2; ring.position.set(cxC - ox, 0.06, czC - oz); grp.add(ring); disp.push(ring.geometry);
+    } else if (desc.landmark.kind === 'park') {
+      // a stunt park: skid circle + banked berms + a short slalom (2D physics — no air)
+      const pad = new THREE.Mesh(shared.padGeo, shared.trackMat); pad.rotation.x = -Math.PI / 2; pad.position.set(cxC - ox, 0.02, czC - oz); pad.receiveShadow = true; grp.add(pad);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(27, 0.5, 6, 40), shared.edgeMat); ring.rotation.x = -Math.PI / 2; ring.position.set(cxC - ox, 0.06, czC - oz); grp.add(ring); disp.push(ring.geometry);
+      const rng = mulcell(rec.seed, rec.cx, rec.cz, SALT.RING);
+      for (let i = 0; i < 4; i++) {
+        const a = rng() * Math.PI * 2, rad = 44 + rng() * 16;
+        const wx = cxC + Math.cos(a) * rad, wz = czC + Math.sin(a) * rad;
+        const rot = a + Math.PI / 2, cs = Math.cos(rot), sn = Math.sin(rot);
+        const bw = 15 + rng() * 10, bd = 4, bh = 2.6 + rng() * 1.8;
+        const bg = new THREE.BoxGeometry(bw, bh, bd);
+        const bm = new THREE.Mesh(bg, shared.wallMat); bm.position.set(wx - ox, bh / 2, wz - oz); bm.rotation.y = rot; bm.castShadow = true; grp.add(bm); disp.push(bg);
+        col.boxes.push({ x: wx, z: wz, hw: bw / 2, hd: bd / 2, cos: cs, sin: sn });
+      }
+    } else if (desc.landmark.kind === 'gate') {
+      // a neon arch straddling a road (or the chunk centre if no road here)
+      let gx = cxC, gz = czC, ang = mulcell(rec.seed, rec.cx, rec.cz, SALT.RING)() * Math.PI;
+      if (desc.roads && desc.roads.length) {
+        let best = null;
+        for (const e of desc.roads) { const s = e.samples; for (let i = 0; i < s.length; i++) { const d = (s[i].x - cxC) ** 2 + (s[i].z - czC) ** 2; if (!best || d < best.d) { const a = s[Math.max(0, i - 1)], b = s[Math.min(s.length - 1, i + 1)]; best = { d, x: s[i].x, z: s[i].z, tx: b.x - a.x, tz: b.z - a.z }; } } }
+        if (best) { gx = best.x; gz = best.z; ang = Math.atan2(best.tz, best.tx); }
+      }
+      const perpx = -Math.sin(ang), perpz = Math.cos(ang), span = 12, h = 8;
+      const pg = new THREE.BoxGeometry(1.2, h, 1.2);
+      for (const s of [-1, 1]) {
+        const px = gx + perpx * span * s, pz = gz + perpz * span * s;
+        const pm = new THREE.Mesh(pg, shared.wallCapMat); pm.position.set(px - ox, h / 2, pz - oz); pm.castShadow = true; grp.add(pm);
+        col.solids.push({ x: px, z: pz, r: 0.8 });
+      }
+      disp.push(pg);
+      const beamG = new THREE.BoxGeometry(1.0, 1.0, span * 2 + 1.2);
+      const beam = new THREE.Mesh(beamG, shared.wallCapMat); beam.position.set(gx - ox, h, gz - oz); beam.rotation.y = -ang; grp.add(beam); disp.push(beamG);
+      rec.procGate = { x: gx, z: gz, r: span };
+    } else { // lookout tower — a tall navigation beacon visible over the fog line
+      const parts = [[8, 12, 8, 4], [6, 16, 6, 16], [4, 12, 4, 30]]; // w,h,d,yBase (tapered)
+      for (const [w, h, d, yb] of parts) { const g = new THREE.BoxGeometry(w, h, d); const m = new THREE.Mesh(g, shared.trackMat); m.position.set(cxC - ox, yb + h / 2, czC - oz); m.castShadow = true; grp.add(m); disp.push(g); }
+      const capG = new THREE.BoxGeometry(5, 1.4, 5); const cap = new THREE.Mesh(capG, shared.wallCapMat); cap.position.set(cxC - ox, 42.7, czC - oz); grp.add(cap); disp.push(capG);
+      col.solids.push({ x: cxC, z: czC, r: 4 });
     }
   }
   function closedResample(pts) {
@@ -347,7 +401,7 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
     if (rec.group) {
       for (const m of rec.checkedOut) { const pool = poolFor(m); if (pool) checkin(pool, m); }
       for (const g of rec.disposables) g.dispose();
-      if (rec.group.parent) rec.group.parent.remove(rec.group);
+      if (rec.group.parent) { rec.group.parent.remove(rec.group); shadowDirty = true; }
     }
   }
   function poolFor(m) {
@@ -385,7 +439,8 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
     home.group.position.set(-shiftTotal.x, 0, -shiftTotal.z);
     for (const rec of records.values()) if (rec.group) rec.group.position.set(rec.cx * CS - shiftTotal.x, 0, rec.cz * CS - shiftTotal.z);
     rebaseCb(dx, dz); // main shifts car/camera/effects/dust by -dx,-dz
-    assignCircuitLights(carState.x, carState.z); // keep circuit lights in the new render frame
+    assignLights(carState.x, carState.z); // keep the shared lights in the new render frame
+    shadowDirty = true; // every caster moved — the shadow map must refresh this frame
     carCX = 1e9; // force re-gather
   }
 
@@ -421,15 +476,15 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
         buildProc(rec);
         scene.add(rec.group);
         rec.state = 'LIVE';
+        shadowDirty = true; // new casters entered the scene — refresh shadows this frame
         // a freshly-built chunk in the sim ring must join the active set immediately
         if (Math.abs(rec.cx - acx) <= CHUNK.simRing && Math.abs(rec.cz - acz) <= CHUNK.simRing) gather();
       }
     }
 
-    // reassign circuit lights to the nearest active circuits (throttled — circuits
-    // are sparse and this scans all records)
+    // reassign the shared lights to the nearest lit points (throttled — scans records)
     lightAcc += dt;
-    if (lightAcc >= 0.35) { lightAcc = 0; assignCircuitLights(carState.x, carState.z); }
+    if (lightAcc >= 0.35) { lightAcc = 0; assignLights(carState.x, carState.z); }
   }
 
   // synchronously build the sim-ring proc chunks around (acx,acz) — colliders exist
@@ -439,7 +494,7 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
       for (let dz = -CHUNK.simRing; dz <= CHUNK.simRing; dz++) {
         const rec = records.get(keyOf(acx + dx, acz + dz));
         if (rec && !rec.home && rec.state !== 'LIVE') {
-          buildProc(rec); scene.add(rec.group); rec.state = 'LIVE';
+          buildProc(rec); scene.add(rec.group); rec.state = 'LIVE'; shadowDirty = true;
           const qi = buildQueue.indexOf(rec); if (qi >= 0) buildQueue.splice(qi, 1);
         }
       }
@@ -455,11 +510,33 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
 
   return { active, update, setQuality, setSeed, primeAround, shiftTotal,
     setRebase(fn) { rebaseCb = fn; },
-    setProcNight(on) { nightOn = !!on; lightAcc = 1e9; }, // force a reassign next tick
+    // 0..1 dimmer for the shared night-light pool (accepts a boolean too). Just sets
+    // the level — the throttled assignLights (≤0.35s) applies it; the day/night cycle
+    // calls this every frame, so DON'T force a full reassign+sort here.
+    setNightLevel(level) { nightLevel = level === true ? 1 : level === false ? 0 : level; },
+    consumeShadowDirty() { const d = shadowDirty; shadowDirty = false; return d; },
     get chunkCount() { return records.size; },
     get queueDepth() { return buildQueue.length; },
     procCircuitAt(x, z) { // render coords
       for (const rec of records.values()) if (rec.procCircuit) { const c = rec.procCircuit; if (Math.hypot((c.x - shiftTotal.x) - x, (c.z - shiftTotal.z) - z) < c.r) return true; } return false;
+    },
+    circuitNear(x, z) { // render coords; nearest live circuit whose radius contains the point
+      for (const rec of records.values()) if (rec.procCircuit) { const c = rec.procCircuit; if (Math.hypot((c.x - shiftTotal.x) - x, (c.z - shiftTotal.z) - z) < c.r) return { cx: rec.cx, cz: rec.cz, x: c.x, z: c.z, r: c.r }; } return null;
+    },
+    procGateAt(x, z) { // render coords; fires TRUE once per gate residency (latches)
+      for (const rec of records.values()) if (rec.procGate && !rec._gateHit) { const g = rec.procGate; if (Math.hypot((g.x - shiftTotal.x) - x, (g.z - shiftTotal.z) - z) < g.r) { rec._gateHit = true; return true; } } return false;
+    },
+    // nearest landmarks to a render-coord point → [{kind, rx, rz, d}] in render coords
+    nearestLandmarks(x, z, k = 3) {
+      const ccx = Math.floor((x + shiftTotal.x) / CS), ccz = Math.floor((z + shiftTotal.z) / CS);
+      const list = wgNearestLandmarks(streamerSeed, ccx, ccz, k);
+      for (const l of list) { l.rx = l.x - shiftTotal.x; l.rz = l.z - shiftTotal.z; }
+      return list;
+    },
+    // { key, name } of the ~2km region containing a render-coord point
+    regionAt(x, z) {
+      const ccx = Math.floor((x + shiftTotal.x) / CS), ccz = Math.floor((z + shiftTotal.z) / CS);
+      return { key: wgRegionKey(ccx, ccz), name: wgRegionName(streamerSeed, ccx, ccz) };
     },
     procTownAt(x, z, r = 90) { // render coords
       for (const rec of records.values()) if (rec.procTown) { const t = rec.procTown; if (Math.hypot((t.x - shiftTotal.x) - x, (t.z - shiftTotal.z) - z) < r) return true; } return false;

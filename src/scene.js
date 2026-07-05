@@ -162,6 +162,51 @@ export function applyPreset(ctx, renderer, key) {
   return p;
 }
 
+// ---- continuous preset blend (for the automatic day/night cycle) ------------
+// Interpolates every field of preset `ka`→`kb` at fraction t into a module-owned
+// blended copy. NEVER mutates the shared PRESETS constants (ctx.preset aliases the
+// blend, and trackSun reads ctx.preset.sunPos every frame, so the sun follows for free).
+const _bA = new THREE.Color(), _bB = new THREE.Color(), _bNeon = new THREE.Color();
+const _blend = { sunPos: [0, 0, 0], neon: 0, night: 0, name: '' };
+const MOON = 0xdfe6ff;
+const nightF = (k) => (k === 'night' ? 1 : 0);
+const starOp = (k) => (k === 'night' ? 0.9 : k === 'dawn' ? 0.12 : 0);
+export function applyPresetBlend(ctx, renderer, ka, kb, t) {
+  const a = PRESETS[ka] || PRESETS.golden, b = PRESETS[kb] || PRESETS.golden;
+  const L = (x, y) => x + (y - x) * t;
+  const LC = (out, ha, hb) => { _bA.setHex(ha); _bB.setHex(hb); return out.copy(_bA).lerp(_bB, t); };
+  LC(ctx.sky.material.uniforms.topColor.value, a.skyTop, b.skyTop);
+  LC(ctx.sky.material.uniforms.horizonColor.value, a.skyHorizon, b.skyHorizon);
+  if (!ctx.scene.fog) ctx.scene.fog = new THREE.Fog(0, 1, 2);
+  LC(ctx.scene.fog.color, a.fog, b.fog);
+  ctx.scene.fog.near = L(a.fogNear, b.fogNear);
+  ctx.scene.fog.far = L(a.fogFar, b.fogFar);
+  renderer.setClearColor(ctx.scene.fog.color, 1);
+  LC(ctx.hemi.color, a.hemiSky, b.hemiSky);
+  LC(ctx.hemi.groundColor, a.hemiGround, b.hemiGround);
+  ctx.hemi.intensity = L(a.hemiIntensity, b.hemiIntensity);
+  LC(ctx.sun.color, a.sun, b.sun);
+  ctx.sun.intensity = L(a.sunIntensity, b.sunIntensity);
+  const sp = _blend.sunPos;
+  sp[0] = L(a.sunPos[0], b.sunPos[0]); sp[1] = L(a.sunPos[1], b.sunPos[1]); sp[2] = L(a.sunPos[2], b.sunPos[2]);
+  ctx.sun.position.set(sp[0], sp[1], sp[2]);
+  LC(ctx.groundMat.color, a.groundColor, b.groundColor);
+  const len = Math.hypot(sp[0], sp[1], sp[2]) || 1, far = WORLD.groundSize * 0.72;
+  ctx.sunDisc.position.set((sp[0] / len) * far, (sp[1] / len) * far, (sp[2] / len) * far);
+  const na = nightF(ka), nb = nightF(kb);
+  _bA.setHex(na ? MOON : a.sun); _bB.setHex(nb ? MOON : b.sun);
+  ctx.sunDiscMat.color.copy(_bA).lerp(_bB, t);
+  ctx.sunDiscMat.opacity = L(na ? 0.85 : 0.95, nb ? 0.85 : 0.95);
+  ctx.sunDisc.scale.setScalar(L(na ? 0.7 : 1, nb ? 0.7 : 1));
+  ctx.starMat.opacity = L(starOp(ka), starOp(kb));
+  _blend.neon = LC(_bNeon, a.neon, b.neon).getHex();
+  _blend.night = L(na, nb);
+  _blend.name = t < 0.5 ? a.name : b.name;
+  ctx.preset = _blend;
+  ctx.presetKey = null;
+  return _blend;
+}
+
 export function onResize(ctx, renderer) {
   // prefer the VISIBLE viewport so nothing hides under iOS Safari's toolbars
   const vv = window.visualViewport;

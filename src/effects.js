@@ -238,12 +238,19 @@ export function createEffects(scene) {
   const smoke = new Smoke(scene);
 
   const _v = new THREE.Vector3();
+  // smoke tint: neutral normally, shifts toward the time-of-day accent while boosting
+  const _smokeBase = new THREE.Color(SMOKE.color);
+  const _smokeHot = new THREE.Color(SMOKE.color);
+  function setAccent(hex) { _smokeHot.setHex(hex); _smokeHot.lerp(_smokeBase, 0.35); }
+  let _wet = false;
+  function setWet(on) { _wet = !!on; }
 
   // render: interpolated car state {x,z,heading}, rearOffsets (local), telemetry
   function update(render, rearOffsets, state, dt) {
     const sinH = Math.sin(render.heading);
     const cosH = Math.cos(render.heading);
     const laying = state.drifting && state.speed > 4;
+    const spraying = _wet && state.speed > 15; // wet-road rooster tail even when gripping
     const halfW = 0.2;
 
     for (let w = 0; w < 2; w++) {
@@ -256,8 +263,11 @@ export function createEffects(scene) {
         smoke.emit(wx, 0.3, wz, state.intensity, dt * 0.5);
       } else {
         skids[w].break();
+        if (spraying) smoke.emit(wx, 0.25, wz, 0.32, dt * 0.4);
       }
     }
+    // boost tint: ease the shared smoke color toward the accent while boosting
+    smoke.mat.uniforms.color.value.lerp(state.boosting ? _smokeHot : _smokeBase, Math.min(dt * 6, 1));
     smoke.update(dt);
   }
 
@@ -274,5 +284,5 @@ export function createEffects(scene) {
     smoke.geo.attributes.position.needsUpdate = true;
   }
 
-  return { update, reset, shift, skids, smoke };
+  return { update, reset, shift, setAccent, setWet, skids, smoke };
 }
