@@ -27,6 +27,7 @@ export function createScoring() {
     justBest: 0, // >0 when the drift just banked set a new single-drift record
     justFailed: false,
     justNearMiss: 0, // near-misses recorded this frame
+    justNearMissPts: 0, // points those near-misses banked (for the HUD)
     justLink: 0, // >0 when a transition link just fired (value = link count)
     justAward: 0, // >0 when a direct (non-bankable) award landed (e.g. ring trial)
     totalTime: 0,
@@ -102,8 +103,10 @@ export function createScoring() {
 
       // near-miss: shaving close to a solid mid-drift banks a bonus + tops up heat
       if (col && col.nearMisses > 0) {
-        st.banked += SCORE.nearMissPoints * st.multiplier * col.nearMisses;
+        const pts = SCORE.nearMissPoints * st.multiplier * col.nearMisses;
+        st.banked += pts;
         st.justNearMiss += col.nearMisses;
+        st.justNearMissPts += pts; // for the HUD "CLOSE +N" pop
         st.heat = 1;
       }
 

@@ -164,12 +164,14 @@ export const SCORE = {
   comboPerSecond: 0.12, // multiplier gained per continuous second drifting
   comboMax: 10, // multiplier cap
   graceTime: 1.1, // seconds you can be straight before combo banks/resets
-  // near-miss: bonus for shaving close to a solid (tree/rock/building/wall) mid-drift
-  nearMissBand: 1.4, // metres of clearance (past the collision radius) that counts as a shave
+  // near-miss: bonus for shaving close to a solid (tree/rock/building/wall) mid-drift.
+  // Credited when you pull CLEAR without hitting (a collision cancels it), so the wider
+  // band just makes the shave easier to trigger, not easier to false-positive on a hit.
+  nearMissBand: 3.6, // metres of clearance (past the collision radius) that counts as a shave
   nearMissMinSpeed: 12, // m/s — no near-miss credit below this
-  nearMissPoints: 120, // base points per shave (x multiplier)
-  heatBonus: 0.5, // point-rate boost at full style heat (+50%)
-  heatDecay: 1.5, // seconds for heat to fall from 1 to 0
+  nearMissPoints: 220, // base points per shave (x multiplier)
+  heatBonus: 0.8, // point-rate boost at full style heat (+80%)
+  heatDecay: 2.2, // seconds for heat to fall from 1 to 0
   // transition links: reward flicking the slide side to side within one chain
   linkBonus: 0.4, // multiplier added per link
   linkDwell: 0.35, // min seconds held on a side before a flip counts as a link
@@ -206,6 +208,8 @@ export const WORLD = {
   shadowRadius: 150, // sun-shadow frustum half-size; follows the car
   carRadius: 1.5, // car collision radius for hitting solid objects
   hitRestitution: 0.35, // bounce off solid objects and walls
+  crashSpeed: 2.5, // inward speed (m/s) at which hitting a solid/building BREAKS the combo
+  wallSlamSpeed: 9, // inward speed to break the combo on a wall (you can slide along walls below this)
   boundaryWallHeight: 26, // tall glowing ring wall at the world edge — fades in as you approach
   wallHeight: 3.2, // drift-track wall height (visual)
   wallThickness: 0.9, // drift-track wall collision thickness

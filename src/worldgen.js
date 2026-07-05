@@ -169,16 +169,28 @@ export function landmarkFor(seed, cx, cz) {
 // Deterministic drift-circuit centreline for a landmark chunk — a closed polyline in
 // ABSOLUTE coords. Depends only on (cx,cz), so chunks.js (geometry) and trials.js (ring
 // placement) can regenerate the SAME path independently with no stored data.
-const CIRCUIT_R = 70;
+// Every wild circuit gets a DISTINCT layout: size, lobe count/depth, ellipse stretch
+// and rotation all hashed from its cell, so no two look alike. Pure function of (cx,cz)
+// (no session seed needed for the shape — the LOCATION already depends on the seed), so
+// chunks.js (geometry) and trials.js (ring placement) regenerate the same path.
 export function circuitPath(cx, cz) {
   const cxC = cx * CS + CS / 2, czC = cz * CS + CS / 2;
-  const pts = [], N = 9;
+  const h = (salt) => hash01(0xC1BC, cx, cz, salt); // per-location layout hashes
+  const baseR = 44 + h(1) * 22;            // 44–66 m
+  const lobes = 2 + Math.floor(h(2) * 4);  // 2–5 lobes
+  const amp = 0.10 + h(3) * 0.20;          // 0.10–0.30 lobe depth
+  const elong = 0.85 + h(4) * 0.27;        // 0.85–1.12 ellipse stretch
+  const rot = h(5) * Math.PI * 2, phase = h(6) * Math.PI * 2;
+  const cr = Math.cos(rot), sr = Math.sin(rot);
+  const N = 28, pts = [];
   for (let i = 0; i < N; i++) {
     const a = (i / N) * Math.PI * 2;
-    const rr = CIRCUIT_R * (0.75 + 0.25 * Math.sin(i * 1.7 + cx));
-    pts.push({ x: cxC + Math.cos(a) * rr, z: czC + Math.sin(a) * rr });
+    const rr = baseR * (1 - amp + amp * Math.sin(lobes * a + phase));
+    const x = Math.cos(a) * rr * elong, z = Math.sin(a) * rr;
+    pts.push({ x: cxC + x * cr - z * sr, z: czC + x * sr + z * cr });
   }
-  return { center: { x: cxC, z: czC }, r: CIRCUIT_R, points: pts };
+  const maxExtent = baseR * (1 + amp) * Math.max(elong, 1);
+  return { center: { x: cxC, z: czC }, r: maxExtent + 22, points: pts };
 }
 
 // Nearest landmarks to an ABSOLUTE point, scanning LM cells outward (bounded). Pure +
@@ -211,8 +223,18 @@ export function nearestLandmarks(seed, cx, cz, k = 3, cellRadius = 3) {
 const REGION_CELL = 8; // 8 chunks ≈ 2 km
 const REGION_ADJ = ['Vermillion', 'Cobalt', 'Ashen', 'Amber', 'Crimson', 'Onyx', 'Ivory',
   'Jade', 'Dusty', 'Silent', 'Golden', 'Violet', 'Rust', 'Pale', 'Neon', 'Hollow',
-  'Frost', 'Ember', 'Slate', 'Copper', 'Wild', 'Lonesome', 'Static', 'Marigold'];
-const BIOME_NOUN = { plain: 'Flats', meadow: 'Fields', forest: 'Woods', rock: 'Ridge' };
+  'Frost', 'Ember', 'Slate', 'Copper', 'Wild', 'Lonesome', 'Static', 'Marigold',
+  'Obsidian', 'Scarlet', 'Azure', 'Dusk', 'Iron', 'Velvet', 'Smoke', 'Cinder',
+  'Crystal', 'Midnight', 'Sable', 'Umber', 'Glass', 'Feral', 'Quiet', 'Broken',
+  'Sunken', 'Distant', 'Faded', 'Electric', 'Verdant', 'Twilight', 'Windward', 'Halcyon',
+  'Drifter\'s', 'Chrome', 'Magenta', 'Indigo', 'Sepia', 'Hazel', 'Molten', 'Whisper'];
+// several nouns per biome, picked by a second hash → hundreds of distinct names
+const BIOME_NOUN = {
+  plain: ['Flats', 'Plains', 'Basin', 'Expanse', 'Reach', 'Steppe'],
+  meadow: ['Fields', 'Meadows', 'Green', 'Downs', 'Vale', 'Hollow'],
+  forest: ['Woods', 'Forest', 'Pines', 'Thicket', 'Grove', 'Timberland'],
+  rock: ['Ridge', 'Bluffs', 'Crags', 'Badlands', 'Mesa', 'Quarry'],
+};
 export function regionKey(cx, cz) { return Math.floor(cx / REGION_CELL) + ',' + Math.floor(cz / REGION_CELL); }
 export function regionName(seed, cx, cz) {
   const rx = Math.floor(cx / REGION_CELL), rz = Math.floor(cz / REGION_CELL);
@@ -222,7 +244,8 @@ export function regionName(seed, cx, cz) {
   const rzMin = rz * REGION_CELL, rzMax = rzMin + REGION_CELL - 1;
   if (rxMin <= CHUNK.homeMax.cx && rxMax >= CHUNK.homeMin.cx && rzMin <= CHUNK.homeMax.cz && rzMax >= CHUNK.homeMin.cz) return 'Home Turf';
   const adj = REGION_ADJ[Math.floor(hash01(seed, rx, rz, SALT.REGION) * REGION_ADJ.length)];
-  const noun = BIOME_NOUN[biomeAt(seed, cxC, czC)] || 'Reach';
+  const nouns = BIOME_NOUN[biomeAt(seed, cxC, czC)] || BIOME_NOUN.plain;
+  const noun = nouns[Math.floor(hash01(seed, rx, rz, SALT.REGION + 1) * nouns.length)];
   return adj + ' ' + noun;
 }
 

@@ -514,7 +514,11 @@ function frame(now) {
       procDriftSec += dt;
     }
     // drive through a gate arch → a boost top-up (latches once per visit)
-    if (world.onProcGate(carState.x, carState.z)) { carState.boost = Math.min(1, carState.boost + 0.3); audio.sfx.ui(); haptics.impact('LIGHT'); }
+    if (world.onProcGate(carState.x, carState.z)) { // drive through a gate arch → free FULL boost
+      carState.boost = 1;
+      audio.sfx.best(); haptics.impact('MEDIUM');
+      hud.celebrate('BOOST!', 'gate cleared — punch it', '#44ffd6');
+    }
     procTownCheckAcc += dt;
     if (procTownCheckAcc >= 0.25) { // scanning every chunk is O(records) — throttle to 4 Hz
       procTownCheckAcc = 0;

@@ -17,6 +17,11 @@ import { SALT } from './rand.js';
 const CS = CHUNK.size;
 const keyOf = (cx, cz) => ((cx + 0x8000) << 16) | (cz + 0x8000);
 
+// Shared beacon-tower body colors, picked per tower by hash so lookouts vary across the
+// world (created once at module load; shared → no per-tower material, no disposal).
+const TOWER_MATS = [0x8a5aa0, 0x4a6ea8, 0xa87a44, 0x3f9a6a, 0xb0545f, 0x5a5ab0, 0xb09a48, 0x40a0a8]
+  .map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.72, metalness: 0.08, flatShading: true }));
+
 // ---- a recyclable pool of InstancedMesh for one species --------------------
 function makePool(geo, mat, cap, slots, castShadow) {
   const free = [];
@@ -264,18 +269,22 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
     const cxC = ox + CS / 2, czC = oz + CS / 2;
     const grp = rec.group;
     if (desc.landmark.kind === 'circuit') {
-      // a small walled drift circuit — path from worldgen so trials.js can match it
+      // a walled drift circuit — path from worldgen so trials.js can match it
       const cp = circuitPath(rec.cx, rec.cz);
       const s = closedResample(cp.points);
       const surf = new THREE.Mesh(ribbonGeo(s, ox, oz, 24, 0.03, true), shared.trackMat); surf.receiveShadow = true; grp.add(surf); disp.push(surf.geometry);
+      // walls have a DRIVE-IN GAP: build them on an OPEN sub-polyline (skip a ~20 m arc)
+      // so you can actually enter the circuit and run the rings.
+      const gapN = Math.max(5, Math.round(s.length * 0.09));
+      const wallS = s.slice(gapN);
       for (const off of [-14.2, 14.2]) {
-        const w = wallGeo(s, ox, oz, off, true);
+        const w = wallGeo(wallS, ox, oz, off, false);
         const wm = new THREE.Mesh(w.geo, shared.wallMat); wm.castShadow = true; grp.add(wm); disp.push(w.geo);
-        const cap = new THREE.Mesh(ribbonGeo(s.map((c, i) => { const p = polyPerp(s, i); return { x: c.x + p.x * off, z: c.z + p.z * off }; }), ox, oz, 0.6, WORLD.wallHeight, true), shared.wallCapMat);
+        const cap = new THREE.Mesh(ribbonGeo(wallS.map((c, i) => { const p = polyPerp(wallS, i); return { x: c.x + p.x * off, z: c.z + p.z * off }; }), ox, oz, 0.6, WORLD.wallHeight, false), shared.wallCapMat);
         grp.add(cap); disp.push(cap.geometry);
         for (const seg of w.segs) col.walls.push(seg);
       }
-      rec.procCircuit = { x: cp.center.x, z: cp.center.z, r: cp.r + 20 };
+      rec.procCircuit = { x: cp.center.x, z: cp.center.z, r: cp.r };
     } else if (desc.landmark.kind === 'town') {
       const rng = mulcell(rec.seed, rec.cx, rec.cz, SALT.TOWN_BUILD);
       const G = 4, CELL = 40, gh = (G - 1) / 2, rot = rng() * Math.PI;
@@ -317,19 +326,32 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
       const pad = new THREE.Mesh(new THREE.CircleGeometry(46, 40), shared.trackMat); pad.rotation.x = -Math.PI / 2; pad.position.set(cxC - ox, 0.02, czC - oz); pad.receiveShadow = true; grp.add(pad); disp.push(pad.geometry);
       const ring = new THREE.Mesh(new THREE.TorusGeometry(46, 0.5, 6, 48), shared.edgeMat); ring.rotation.x = -Math.PI / 2; ring.position.set(cxC - ox, 0.06, czC - oz); grp.add(ring); disp.push(ring.geometry);
     } else if (desc.landmark.kind === 'park') {
-      // a stunt park: skid circle + banked berms + a short slalom (2D physics — no air)
-      const pad = new THREE.Mesh(shared.padGeo, shared.trackMat); pad.rotation.x = -Math.PI / 2; pad.position.set(cxC - ox, 0.02, czC - oz); pad.receiveShadow = true; grp.add(pad);
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(27, 0.5, 6, 40), shared.edgeMat); ring.rotation.x = -Math.PI / 2; ring.position.set(cxC - ox, 0.06, czC - oz); grp.add(ring); disp.push(ring.geometry);
+      // a drift PARKOUR: a skid circle to loop, a cluster of pillars to weave/drift
+      // through, and a slalom chicane running off one side. All collidable, laid out with
+      // drivable gaps so you can chain technical drifts around them (physics is 2D — no air).
       const rng = mulcell(rec.seed, rec.cx, rec.cz, SALT.RING);
-      for (let i = 0; i < 4; i++) {
-        const a = rng() * Math.PI * 2, rad = 44 + rng() * 16;
-        const wx = cxC + Math.cos(a) * rad, wz = czC + Math.sin(a) * rad;
-        const rot = a + Math.PI / 2, cs = Math.cos(rot), sn = Math.sin(rot);
-        const bw = 15 + rng() * 10, bd = 4, bh = 2.6 + rng() * 1.8;
-        const bg = new THREE.BoxGeometry(bw, bh, bd);
-        const bm = new THREE.Mesh(bg, shared.wallMat); bm.position.set(wx - ox, bh / 2, wz - oz); bm.rotation.y = rot; bm.castShadow = true; grp.add(bm); disp.push(bg);
-        col.boxes.push({ x: wx, z: wz, hw: bw / 2, hd: bd / 2, cos: cs, sin: sn });
+      const pad = new THREE.Mesh(shared.padGeo, shared.trackMat); pad.rotation.x = -Math.PI / 2; pad.position.set(cxC - ox, 0.02, czC - oz); pad.receiveShadow = true; grp.add(pad);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(24, 0.5, 6, 36), shared.edgeMat); ring.rotation.x = -Math.PI / 2; ring.position.set(cxC - ox, 0.06, czC - oz); grp.add(ring); disp.push(ring.geometry);
+      // pillar ring — drift around and between them
+      const pN = 8 + Math.floor(rng() * 5), pR = 30 + rng() * 8;
+      const pg = new THREE.BoxGeometry(4.5, 9, 4.5);
+      for (let i = 0; i < pN; i++) {
+        const a = (i / pN) * Math.PI * 2 + rng() * 0.25;
+        const px = cxC + Math.cos(a) * pR, pz = czC + Math.sin(a) * pR;
+        const m = new THREE.Mesh(pg, shared.wallCapMat); m.position.set(px - ox, 4.5, pz - oz); m.castShadow = true; grp.add(m);
+        col.solids.push({ x: px, z: pz, r: 3.2 });
       }
+      disp.push(pg);
+      // slalom chicane of angled walls running off in one direction (thread it)
+      const cd = rng() * Math.PI * 2, cdx = Math.cos(cd), cdz = Math.sin(cd), crot = cd + Math.PI / 2, ccos = Math.cos(crot), csin = Math.sin(crot);
+      const chG = new THREE.BoxGeometry(13, 4, 3);
+      for (let i = 0; i < 5; i++) {
+        const along = 52 + i * 12, side = (i % 2 ? 1 : -1) * 9;
+        const wx = cxC + cdx * along - cdz * side, wz = czC + cdz * along + cdx * side;
+        const m = new THREE.Mesh(chG, shared.wallMat); m.position.set(wx - ox, 2, wz - oz); m.rotation.y = crot; m.castShadow = true; grp.add(m);
+        col.boxes.push({ x: wx, z: wz, hw: 6.5, hd: 1.5, cos: ccos, sin: csin });
+      }
+      disp.push(chG);
     } else if (desc.landmark.kind === 'gate') {
       // a neon arch straddling a road (or the chunk centre if no road here)
       let gx = cxC, gz = czC, ang = mulcell(rec.seed, rec.cx, rec.cz, SALT.RING)() * Math.PI;
@@ -348,12 +370,14 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
       disp.push(pg);
       const beamG = new THREE.BoxGeometry(1.0, 1.0, span * 2 + 1.2);
       const beam = new THREE.Mesh(beamG, shared.wallCapMat); beam.position.set(gx - ox, h, gz - oz); beam.rotation.y = -ang; grp.add(beam); disp.push(beamG);
-      rec.procGate = { x: gx, z: gz, r: span };
-    } else { // lookout tower — a tall navigation beacon visible over the fog line
-      const parts = [[8, 12, 8, 4], [6, 16, 6, 16], [4, 12, 4, 30]]; // w,h,d,yBase (tapered)
-      for (const [w, h, d, yb] of parts) { const g = new THREE.BoxGeometry(w, h, d); const m = new THREE.Mesh(g, shared.trackMat); m.position.set(cxC - ox, yb + h / 2, czC - oz); m.castShadow = true; grp.add(m); disp.push(g); }
-      const capG = new THREE.BoxGeometry(5, 1.4, 5); const cap = new THREE.Mesh(capG, shared.wallCapMat); cap.position.set(cxC - ox, 42.7, czC - oz); grp.add(cap); disp.push(capG);
-      col.solids.push({ x: cxC, z: czC, r: 4 });
+      rec.procGate = { x: gx, z: gz, r: span + 6 }; // trigger radius wider than the arch so you can't miss it
+    } else { // lookout — a big colored beacon tower, on the ground, visible over the fog
+      const tm = TOWER_MATS[Math.floor(mulcell(rec.seed, rec.cx, rec.cz, SALT.CLUSTER)() * TOWER_MATS.length)];
+      const segs = [[30, 48, 30, 0], [23, 50, 23, 48], [16, 46, 16, 98], [10, 40, 10, 144]]; // w,h,d,yBase — tapered from the GROUND up (~184 m)
+      let top = 0;
+      for (const [w, h, d, yb] of segs) { const g = new THREE.BoxGeometry(w, h, d); const m = new THREE.Mesh(g, tm); m.position.set(cxC - ox, yb + h / 2, czC - oz); m.castShadow = true; grp.add(m); disp.push(g); top = yb + h; }
+      const capG = new THREE.BoxGeometry(12, 3, 12); const cap = new THREE.Mesh(capG, shared.wallCapMat); cap.position.set(cxC - ox, top + 1.5, czC - oz); grp.add(cap); disp.push(capG);
+      col.solids.push({ x: cxC, z: czC, r: 15 });
     }
   }
   function closedResample(pts) {

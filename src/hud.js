@@ -65,8 +65,10 @@ export function createHUD() {
       const scale = 1 + Math.min(m / 10, 1) * 0.5 + comboPulse;
       combo.style.transform = `translateX(-50%) scale(${scale.toFixed(3)})`;
       comboPulse = Math.max(0, comboPulse - dt * 4);
+      combo.classList.toggle('hot', st.heat > 0.05); // style heat from near-miss shaves
     } else {
       combo.classList.remove('show');
+      combo.classList.remove('hot');
     }
 
     // banked event
@@ -98,10 +100,10 @@ export function createHUD() {
       else linkTag.classList.remove('show');
       if (st.justLink > 0) { linkTag.classList.remove('pop'); void linkTag.offsetWidth; linkTag.classList.add('pop'); comboPulse = 0.25; st.justLink = 0; }
     }
-    // near-miss shave pop
+    // near-miss shave pop — show the points it banked so "close = gain" is visible
     if (st.justNearMiss > 0) {
-      if (nearFlash) { nearFlash.classList.remove('play'); void nearFlash.offsetWidth; nearFlash.classList.add('play'); }
-      st.justNearMiss = 0;
+      if (nearFlash) { nearFlash.textContent = 'CLOSE! +' + fmt(st.justNearMissPts); nearFlash.classList.remove('play'); void nearFlash.offsetWidth; nearFlash.classList.add('play'); }
+      st.justNearMiss = 0; st.justNearMissPts = 0;
     }
     // direct award (ring trial etc.)
     if (st.justAward > 0) {

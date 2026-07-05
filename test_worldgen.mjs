@@ -73,7 +73,9 @@ check('wide region has roads + biome variety', roadCells > 0 && biomes.size > 1,
 
 // 7) circuitPath is a pure function of (cx,cz) — trials.js and chunks.js must match.
 const cpA = JSON.stringify(circuitPath(21, -13)), cpB = JSON.stringify(circuitPath(21, -13));
-check('circuitPath deterministic', cpA === cpB && circuitPath(21, -13).points.length === 9);
+// different cells must produce DIFFERENT layouts (variety), same cell identical (determinism)
+const cpDiff = JSON.stringify(circuitPath(21, -13)) !== JSON.stringify(circuitPath(22, -13));
+check('circuitPath deterministic + varied', cpA === cpB && circuitPath(21, -13).points.length > 8 && cpDiff);
 
 // 8) all 7 landmark kinds appear across a wide scan (kind ladder wired end to end).
 const kinds = {};

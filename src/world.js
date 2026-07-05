@@ -778,7 +778,7 @@ export function resolveCollisions(state, world) {
     const rr = o.r + carR;
     const d2 = dx * dx + dz * dz;
     if (d2 < rr * rr) {
-      o._nm = false; // touching, not shaving
+      o._nm = 2; // hit this pass — cancels any pending shave (a hit must NOT read as a near-miss)
       const d = Math.max(Math.sqrt(d2), 0.001);
       const nx = dx / d;
       const nz = dz / d;
@@ -788,14 +788,14 @@ export function resolveCollisions(state, world) {
       if (vIn < 0) {
         state.vx -= (1 + e) * vIn * nx; // reflect the inward component
         state.vz -= (1 + e) * vIn * nz;
-        if (-vIn > 12) hardHit = true; // a fast hit breaks the combo
+        if (-vIn > WORLD.crashSpeed) hardHit = true; // any real contact with a solid breaks the combo
       }
       state.vx *= 0.82; // scrub speed on contact
       state.vz *= 0.82;
-    } else if (nmActive) {
+    } else {
       const band = rr + nmBand;
-      if (d2 < band * band) { if (!o._nm) { o._nm = true; nm++; } }
-      else if (d2 > (rr + nmClear) * (rr + nmClear)) o._nm = false;
+      if (d2 < band * band) { if (nmActive && o._nm !== 2) o._nm = 1; } // inside the shave band
+      else if (d2 > (rr + nmClear) * (rr + nmClear)) { if (o._nm === 1) nm++; o._nm = 0; } // pulled CLEAR without hitting → credit
     }
   }
 
@@ -809,14 +809,12 @@ export function resolveCollisions(state, world) {
     const ox = lx - clx, oz = lz - clz;
     const d2 = ox * ox + oz * oz;
     if (d2 >= carR * carR) {
-      if (nmActive) {
-        const band = carR + nmBand;
-        if (d2 < band * band) { if (!b._nm) { b._nm = true; nm++; } }
-        else if (d2 > (carR + nmClear) * (carR + nmClear)) b._nm = false;
-      }
+      const band = carR + nmBand;
+      if (d2 < band * band) { if (nmActive && b._nm !== 2) b._nm = 1; }
+      else if (d2 > (carR + nmClear) * (carR + nmClear)) { if (b._nm === 1) nm++; b._nm = 0; }
       continue;
     }
-    b._nm = false; // colliding
+    b._nm = 2; // colliding — cancel any pending shave
     let nlx, nlz, pen;
     if (d2 > 1e-6) {
       const d = Math.sqrt(d2);
@@ -835,7 +833,7 @@ export function resolveCollisions(state, world) {
     if (vIn < 0) {
       state.vx -= (1 + e) * vIn * wnx; // reflect inward component
       state.vz -= (1 + e) * vIn * wnz;
-      if (-vIn > 12) hardHit = true; // hard slam breaks the combo
+      if (-vIn > WORLD.crashSpeed) hardHit = true; // clipping a building breaks the combo
     }
     state.vx *= 0.82; // scrub speed on contact
     state.vz *= 0.82;
@@ -871,7 +869,7 @@ export function resolveCollisions(state, world) {
     const wdx = state.x - px, wdz = state.z - pz;
     const wd2 = wdx * wdx + wdz * wdz;
     if (wd2 < half * half) {
-      w._nm = false; // scraping the wall, not shaving
+      w._nm = 2; // touching the wall — cancel any pending shave
       const d = Math.max(Math.sqrt(wd2), 0.001);
       const nx = wdx / d, nz = wdz / d;
       state.x = px + nx * half; // push out to the wall surface
@@ -880,14 +878,14 @@ export function resolveCollisions(state, world) {
       if (vIn < 0) {
         state.vx -= (1 + e) * vIn * nx; // reflect the inward component
         state.vz -= (1 + e) * vIn * nz;
-        if (-vIn > 13) hardHit = true; // a fast slam into the wall breaks the combo
+        if (-vIn > WORLD.wallSlamSpeed) hardHit = true; // slamming a wall breaks it (you can still slide along)
       }
       state.vx *= 0.88; // scrub some speed on contact
       state.vz *= 0.88;
-    } else if (nmActive) {
+    } else {
       const band = half + nmBand;
-      if (wd2 < band * band) { if (!w._nm) { w._nm = true; nm++; } }
-      else if (wd2 > (half + nmClear) * (half + nmClear)) w._nm = false;
+      if (wd2 < band * band) { if (nmActive && w._nm !== 2) w._nm = 1; }
+      else if (wd2 > (half + nmClear) * (half + nmClear)) { if (w._nm === 1) nm++; w._nm = 0; }
     }
   }
 

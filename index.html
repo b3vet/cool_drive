@@ -78,7 +78,10 @@
   #combo { position: fixed; left: 50%; bottom: 13%; transform: translateX(-50%) skewX(-6deg); --c: var(--accent); text-align: center; opacity: 0; transition: opacity .15s ease; transform-origin: center bottom; will-change: transform; }
   #combo.show { opacity: 1; }
   #combo.fail #comboVal { animation: shake .35s; color: var(--hot) !important; text-shadow: 0 0 24px var(--hot); }
+  .comboRow { display: inline-flex; align-items: baseline; gap: 8px; justify-content: center; }
   #comboVal { font-family: var(--disp); font-size: clamp(38px, 8vw, 76px); font-weight: 700; color: var(--c); text-shadow: 0 0 26px var(--c), 0 4px 18px rgba(0,0,0,.6); line-height: 1; font-variant-numeric: tabular-nums; }
+  /* style-heat glow (near-miss shaves) — signals "you're earning bonus points" */
+  #combo.hot #comboVal { color: #ffb14a; text-shadow: 0 0 30px #ff7a1a, 0 0 12px #ffd24a, 0 4px 18px rgba(0,0,0,.6); }
   #banked { font-family: var(--disp); font-size: clamp(15px, 3vw, 24px); font-weight: 600; opacity: .92; margin-top: 3px; letter-spacing: .04em; }
   @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-8px)} 75%{transform:translateX(8px)} }
 
@@ -123,7 +126,8 @@
   #awardFlash { position: fixed; left: 50%; top: 30%; transform: translate(-50%,-50%) skewX(-6deg); font-family: var(--disp); font-weight: 700; font-size: clamp(24px,5vw,46px); color: var(--gold); text-shadow: 0 0 30px rgba(255,210,74,.6); opacity: 0; pointer-events: none; z-index: 7; font-variant-numeric: tabular-nums; }
   #awardFlash.play { animation: celebrate 1.4s cubic-bezier(.2,.8,.2,1) forwards; }
 
-  #linkTag { font-family: var(--disp); font-size: clamp(13px,2.6vw,20px); font-weight: 700; letter-spacing: .06em; color: var(--gold); text-shadow: 0 0 16px rgba(255,210,74,.5); margin-top: 4px; opacity: 0; transition: opacity .12s ease; }
+  /* inline beside the multiplier (never grows the combo box → no overlap with DRIFT) */
+  #linkTag { font-family: var(--disp); font-size: clamp(12px,2.2vw,18px); font-weight: 700; letter-spacing: .04em; color: var(--gold); text-shadow: 0 0 16px rgba(255,210,74,.5); white-space: nowrap; opacity: 0; transition: opacity .12s ease; }
   #linkTag.show { opacity: .95; }
   #linkTag.pop { animation: shake .35s; }
 
@@ -341,12 +345,12 @@
 <div class="hud">
   <div id="scoreWrap"><div id="score">0</div><div id="best">BEST 0</div><div id="compass"></div></div>
   <div id="bankFlash"></div>
-  <div id="nearFlash">CLOSE!</div>
+  <div id="nearFlash"></div>
   <div id="awardFlash"></div>
   <div id="presetName">Golden Hour</div>
   <div id="celebrate"><div class="big"></div><div class="sub"></div></div>
   <div id="driftFloat">D R I F T</div>
-  <div id="combo"><div id="comboVal">×1.0</div><div id="banked">+0</div><div id="linkTag"></div></div>
+  <div id="combo"><div class="comboRow"><div id="comboVal">×1.0</div><div id="linkTag"></div></div><div id="banked">+0</div></div>
   <div id="trialHud"></div>
   <div id="speedWrap"><div id="speed">0</div><div class="unit">KM/H</div><div id="boostBar"><div id="boostFill"></div></div></div>
 </div>
