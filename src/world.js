@@ -110,6 +110,10 @@ function buildHomeRegion(scene, preset) {
   // shared materials
   const asphalt = new THREE.MeshStandardMaterial({ color: 0x232730, roughness: 0.95, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
   const edgeMat = mat(preset.neon, { emissive: preset.neon, emissiveIntensity: 0.5, roughness: 0.5 });
+  // render the neon edge lines ON TOP of the road surface at ALL distances: the surface
+  // has polygonOffset -1, so without a stronger offset the edges lose the depth test at
+  // grazing angles ahead of the car and appear to only draw right behind it.
+  edgeMat.polygonOffset = true; edgeMat.polygonOffsetFactor = -4; edgeMat.polygonOffsetUnits = -4;
   const dashMat = new THREE.MeshStandardMaterial({ color: 0xd9dde6, roughness: 0.7, transparent: true, opacity: 0.8 });
   const postMat = mat(preset.neon, { emissive: preset.neon, emissiveIntensity: 0.9, roughness: 0.4 });
 

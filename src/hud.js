@@ -69,6 +69,7 @@ export function createHUD() {
     } else {
       combo.classList.remove('show');
       combo.classList.remove('hot');
+      combo.classList.remove('linked');
     }
 
     // banked event
@@ -94,10 +95,13 @@ export function createHUD() {
       st.justFailed = false;
     }
 
-    // link counter (direction transitions within the current chain)
+    // link counter (direction transitions within the current chain) — a line below the
+    // banked amount; the combo drops down (.linked) so it never crowds the DRIFT text
     if (linkTag) {
-      if (st.active && st.links > 0) { linkTag.classList.add('show'); linkTag.textContent = 'LINK ×' + st.links; }
+      const linked = st.active && st.links > 0;
+      if (linked) { linkTag.classList.add('show'); linkTag.textContent = 'LINK ×' + st.links; }
       else linkTag.classList.remove('show');
+      combo.classList.toggle('linked', linked);
       if (st.justLink > 0) { linkTag.classList.remove('pop'); void linkTag.offsetWidth; linkTag.classList.add('pop'); comboPulse = 0.25; st.justLink = 0; }
     }
     // near-miss shave pop — show the points it banked so "close = gain" is visible

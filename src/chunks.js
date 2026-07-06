@@ -326,32 +326,30 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
       const pad = new THREE.Mesh(new THREE.CircleGeometry(46, 40), shared.trackMat); pad.rotation.x = -Math.PI / 2; pad.position.set(cxC - ox, 0.02, czC - oz); pad.receiveShadow = true; grp.add(pad); disp.push(pad.geometry);
       const ring = new THREE.Mesh(new THREE.TorusGeometry(46, 0.5, 6, 48), shared.edgeMat); ring.rotation.x = -Math.PI / 2; ring.position.set(cxC - ox, 0.06, czC - oz); grp.add(ring); disp.push(ring.geometry);
     } else if (desc.landmark.kind === 'park') {
-      // a drift PARKOUR: a skid circle to loop, a cluster of pillars to weave/drift
-      // through, and a slalom chicane running off one side. All collidable, laid out with
-      // drivable gaps so you can chain technical drifts around them (physics is 2D — no air).
+      // a drift GYMKHANA: a big flat pad with a SLALOM SPINE of angled walls to weave/drift
+      // through, and a donut pillar + ring at EACH END to swing around. A real course you
+      // thread and link (physics is 2D — no air), randomized per location.
       const rng = mulcell(rec.seed, rec.cx, rec.cz, SALT.RING);
-      const pad = new THREE.Mesh(shared.padGeo, shared.trackMat); pad.rotation.x = -Math.PI / 2; pad.position.set(cxC - ox, 0.02, czC - oz); pad.receiveShadow = true; grp.add(pad);
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(24, 0.5, 6, 36), shared.edgeMat); ring.rotation.x = -Math.PI / 2; ring.position.set(cxC - ox, 0.06, czC - oz); grp.add(ring); disp.push(ring.geometry);
-      // pillar ring — drift around and between them
-      const pN = 8 + Math.floor(rng() * 5), pR = 30 + rng() * 8;
-      const pg = new THREE.BoxGeometry(4.5, 9, 4.5);
-      for (let i = 0; i < pN; i++) {
-        const a = (i / pN) * Math.PI * 2 + rng() * 0.25;
-        const px = cxC + Math.cos(a) * pR, pz = czC + Math.sin(a) * pR;
-        const m = new THREE.Mesh(pg, shared.wallCapMat); m.position.set(px - ox, 4.5, pz - oz); m.castShadow = true; grp.add(m);
-        col.solids.push({ x: px, z: pz, r: 3.2 });
+      const pad = new THREE.Mesh(new THREE.CircleGeometry(60, 44), shared.trackMat); pad.rotation.x = -Math.PI / 2; pad.position.set(cxC - ox, 0.02, czC - oz); pad.receiveShadow = true; grp.add(pad); disp.push(pad.geometry);
+      const dir = rng() * Math.PI * 2, ax = Math.cos(dir), az = Math.sin(dir), rx = -az, rz = ax; // spine axis + perpendicular
+      const wG = new THREE.BoxGeometry(3, 5, 11); // slalom wall
+      const nW = 6;
+      for (let i = 0; i < nW; i++) {
+        const along = (i - (nW - 1) / 2) * 17, side = (i % 2 ? 1 : -1) * 8;
+        const wx = cxC + ax * along + rx * side, wz = czC + az * along + rz * side;
+        const rot = dir + 0.5 * (i % 2 ? 1 : -1); // alternate the angle → a drift line through the S
+        const m = new THREE.Mesh(wG, shared.wallMat); m.position.set(wx - ox, 2.5, wz - oz); m.rotation.y = rot; m.castShadow = true; grp.add(m);
+        col.boxes.push({ x: wx, z: wz, hw: 1.5, hd: 5.5, cos: Math.cos(rot), sin: Math.sin(rot) });
       }
-      disp.push(pg);
-      // slalom chicane of angled walls running off in one direction (thread it)
-      const cd = rng() * Math.PI * 2, cdx = Math.cos(cd), cdz = Math.sin(cd), crot = cd + Math.PI / 2, ccos = Math.cos(crot), csin = Math.sin(crot);
-      const chG = new THREE.BoxGeometry(13, 4, 3);
-      for (let i = 0; i < 5; i++) {
-        const along = 52 + i * 12, side = (i % 2 ? 1 : -1) * 9;
-        const wx = cxC + cdx * along - cdz * side, wz = czC + cdz * along + cdx * side;
-        const m = new THREE.Mesh(chG, shared.wallMat); m.position.set(wx - ox, 2, wz - oz); m.rotation.y = crot; m.castShadow = true; grp.add(m);
-        col.boxes.push({ x: wx, z: wz, hw: 6.5, hd: 1.5, cos: ccos, sin: csin });
+      disp.push(wG);
+      const cG = new THREE.BoxGeometry(5, 12, 5); // end donut pillars
+      for (const s of [-1, 1]) {
+        const ex = cxC + ax * 52 * s, ez = czC + az * 52 * s;
+        const c = new THREE.Mesh(cG, shared.wallCapMat); c.position.set(ex - ox, 6, ez - oz); c.castShadow = true; grp.add(c);
+        col.solids.push({ x: ex, z: ez, r: 4 });
+        const rgm = new THREE.Mesh(new THREE.TorusGeometry(13, 0.5, 6, 28), shared.edgeMat); rgm.rotation.x = -Math.PI / 2; rgm.position.set(ex - ox, 0.06, ez - oz); grp.add(rgm); disp.push(rgm.geometry);
       }
-      disp.push(chG);
+      disp.push(cG);
     } else if (desc.landmark.kind === 'gate') {
       // a neon arch straddling a road (or the chunk centre if no road here)
       let gx = cxC, gz = czC, ang = mulcell(rec.seed, rec.cx, rec.cz, SALT.RING)() * Math.PI;

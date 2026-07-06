@@ -145,25 +145,58 @@ export function biomeAt(seed, x, z) {
 
 // landmark grid: one candidate per LM_CELL (5 chunks); exists ~55% of cells
 const LM_CELL = 5;
-export function landmarkFor(seed, cx, cz) {
-  const lx = Math.floor(cx / LM_CELL), lz = Math.floor(cz / LM_CELL);
+// the landmark for an LM cell → { kind, cx, cz } (host chunk) or null
+function landmarkForCell(seed, lx, lz) {
   if (hash01(seed, lx, lz, SALT.LANDMARK) > 0.55) return null; // no landmark in this cell
-  // pick the chunk within the cell that hosts it
   const r = cellRng(seed, lx, lz, SALT.LANDMARK + 1);
-  const ox = Math.floor(r() * LM_CELL), oz = Math.floor(r() * LM_CELL);
-  const hostCx = lx * LM_CELL + ox, hostCz = lz * LM_CELL + oz;
-  if (hostCx !== cx || hostCz !== cz) return null;
-  if (homeReserved(cx, cz)) return null; // never in the home region
+  const hostCx = lx * LM_CELL + Math.floor(r() * LM_CELL);
+  const hostCz = lz * LM_CELL + Math.floor(r() * LM_CELL);
+  if (homeReserved(hostCx, hostCz)) return null; // never in the home region
   const kindRoll = hash01(seed, lx, lz, SALT.LANDMARK_KIND);
   let kind;
-  if (kindRoll < 0.28) kind = 'circuit';
-  else if (kindRoll < 0.52) kind = 'town';
-  else if (kindRoll < 0.68) kind = 'slalom';
-  else if (kindRoll < 0.80) kind = 'skidpad';
-  else if (kindRoll < 0.87) kind = 'park';      // banked stunt park
-  else if (kindRoll < 0.94) kind = 'gate';      // neon arch over a road
-  else kind = 'lookout';                         // tall beacon tower (navigation anchor)
-  return { kind, cx, cz };
+  if (kindRoll < 0.25) kind = 'circuit';
+  else if (kindRoll < 0.46) kind = 'town';
+  else if (kindRoll < 0.60) kind = 'slalom';
+  else if (kindRoll < 0.71) kind = 'skidpad';
+  else if (kindRoll < 0.79) kind = 'park';       // drift gymkhana
+  else if (kindRoll < 0.86) kind = 'gate';       // neon arch over a road
+  else kind = 'lookout';                          // tall beacon tower — 0.14, common so they're findable
+  return { kind, cx: hostCx, cz: hostCz };
+}
+export function landmarkFor(seed, cx, cz) {
+  const lm = landmarkForCell(seed, Math.floor(cx / LM_CELL), Math.floor(cz / LM_CELL));
+  return (lm && lm.cx === cx && lm.cz === cz) ? { kind: lm.kind, cx, cz } : null;
+}
+
+// Surface landmarks near a chunk whose footprint roads must NOT cross (circuit walls,
+// park, skidpad, lookout base). Scans the 3x3 LM cells around the chunk. Returns
+// {x, z, r} circles in ABSOLUTE coords. Towns/slaloms/gates are fine to have roads.
+function surfaceFootprints(seed, cx, cz) {
+  const out = [];
+  const lcx = Math.floor(cx / LM_CELL), lcz = Math.floor(cz / LM_CELL);
+  for (let dlx = -1; dlx <= 1; dlx++) for (let dlz = -1; dlz <= 1; dlz++) {
+    const lm = landmarkForCell(seed, lcx + dlx, lcz + dlz);
+    if (!lm) continue;
+    const mx = lm.cx * CS + CS / 2, mz = lm.cz * CS + CS / 2;
+    if (lm.kind === 'circuit') { const cp = circuitPath(lm.cx, lm.cz); out.push({ x: cp.center.x, z: cp.center.z, r: cp.r + 6 }); }
+    else if (lm.kind === 'park') out.push({ x: mx, z: mz, r: 58 });
+    else if (lm.kind === 'skidpad') out.push({ x: mx, z: mz, r: 52 });
+    else if (lm.kind === 'lookout') out.push({ x: mx, z: mz, r: 24 });
+  }
+  return out;
+}
+const inAnyFootprint = (x, z, fps) => { for (const f of fps) { const dx = x - f.x, dz = z - f.z; if (dx * dx + dz * dz < f.r * f.r) return true; } return false; };
+// split each road edge's samples into runs that stay OUTSIDE all footprints (so a road
+// approaches a landmark and stops at its edge instead of cutting through it)
+function clipEdges(edges, fps) {
+  const out = [];
+  for (const e of edges) {
+    let run = [];
+    const flush = () => { if (run.length >= 2) out.push({ a: run[0], b: run[run.length - 1], samples: run, width: e.width, id: e.id }); run = []; };
+    for (const p of e.samples) { if (inAnyFootprint(p.x, p.z, fps)) flush(); else run.push(p); }
+    flush();
+  }
+  return out;
 }
 
 // Deterministic drift-circuit centreline for a landmark chunk — a closed polyline in
@@ -254,8 +287,15 @@ export function regionName(seed, cx, cz) {
 // road network + any landmark footprint in the chunk.
 export function describeChunk(seed, cx, cz) {
   const home = homeReserved(cx, cz);
-  const roads = home ? [] : ownedEdges(seed, cx, cz);
+  let roads = home ? [] : ownedEdges(seed, cx, cz);
   const landmark = home ? null : landmarkFor(seed, cx, cz);
+  // clip roads out of nearby circuit/park/skidpad/lookout footprints so they don't run
+  // through those landmarks (a circuit has its own track + walls inside it)
+  let junctions = roads._nodes || [];
+  if (!home && roads.length) {
+    const fps = surfaceFootprints(seed, cx, cz);
+    if (fps.length) { roads = clipEdges(roads, fps); junctions = junctions.filter((n) => !inAnyFootprint(n.x, n.z, fps)); }
+  }
   const ox = cx * CS, oz = cz * CS; // chunk absolute origin (min corner)
   const cxC = ox + CS / 2, czC = oz + CS / 2;
   const biome = biomeAt(seed, cxC, czC);
@@ -288,5 +328,5 @@ export function describeChunk(seed, cx, cz) {
     if (biome === 'plain' && rng() < 0.4) place(scenery.trees, 6, 20, 0.9);
   }
 
-  return { cx, cz, home, biome, roads, junctions: roads._nodes || [], landmark, scenery, ox, oz };
+  return { cx, cz, home, biome, roads, junctions, landmark, scenery, ox, oz };
 }

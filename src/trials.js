@@ -25,6 +25,12 @@ export function createTrials({ scene, streamer, scoring, hud, onComplete }) {
     scene.add(m);
     rings.push(m);
   }
+  // a tall glowing beacon column over the NEXT ring so the correct direction to go is
+  // always obvious (which way around the loop is not intuitive otherwise)
+  const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 44, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffe7a8, transparent: true, opacity: 0.4, depthWrite: false }));
+  beacon.visible = false;
+  scene.add(beacon);
   const trialHud = document.getElementById('trialHud');
 
   let state = 'IDLE'; // IDLE | ARMED | RUNNING
@@ -53,15 +59,21 @@ export function createTrials({ scene, streamer, scoring, hud, onComplete }) {
   }
 
   function positionRings() {
-    if (!active) { for (const r of rings) r.visible = false; return; }
+    if (!active) { for (const r of rings) r.visible = false; beacon.visible = false; return; }
     for (let i = 0; i < RING_COUNT; i++) {
       const r = rings[i];
       if (i < active.next) { r.visible = false; continue; } // already passed
       const g = active.gates[i];
       r.position.set(g.x - streamer.shiftTotal.x, 0.5, g.z - streamer.shiftTotal.z);
-      r.material = i === active.next ? nextMat : idleMat;
+      const isNext = i === active.next;
+      r.material = isNext ? nextMat : idleMat;
+      r.scale.setScalar(isNext ? 1.35 : 1); // the next ring is bigger so it stands out
       r.visible = true;
     }
+    // beacon column marks exactly the ring to head for next
+    const ng = active.gates[active.next];
+    if (ng) { beacon.visible = true; beacon.position.set(ng.x - streamer.shiftTotal.x, 22, ng.z - streamer.shiftTotal.z); }
+    else beacon.visible = false;
   }
 
   function updateHud() {
@@ -82,6 +94,7 @@ export function createTrials({ scene, streamer, scoring, hud, onComplete }) {
     cooldownKey = active.cx + ',' + active.cz;
     active = null; state = 'IDLE';
     for (const r of rings) r.visible = false;
+    beacon.visible = false;
     updateHud();
     onComplete && onComplete();
   }
@@ -89,6 +102,7 @@ export function createTrials({ scene, streamer, scoring, hud, onComplete }) {
   function abort() {
     active = null; state = 'IDLE';
     for (const r of rings) r.visible = false;
+    beacon.visible = false;
     updateHud();
   }
 
