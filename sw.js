@@ -1,7 +1,7 @@
 // CoolDrive service worker — network-first (always fresh when online, offline-capable).
 // Network-first avoids serving stale modules during development while still letting
 // the game work with no connection after the first visit.
-const CACHE = 'cooldrive-v5';
+const CACHE = 'cooldrive-v6';
 const CORE = [
   './', './index.html', './manifest.webmanifest',
   './icon-192.png', './icon-512.png', './icon-180.png',
@@ -33,7 +33,19 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || req.headers.has('range')) return; // let audio range requests stream
-  if (new URL(req.url).origin !== location.origin) return; // ignore cross-origin
+  const url = new URL(req.url);
+  if (url.origin !== location.origin) return; // ignore cross-origin
+  // Vendored libs + fonts are immutable (versioned by CACHE) — serve them CACHE-FIRST so the big
+  // three.js bundle isn't re-downloaded + re-cached on every load mid-session. A CACHE bump (above)
+  // invalidates them on a real update. Everything else stays network-first (fresh in dev).
+  if (url.pathname.includes('/vendor/')) {
+    e.respondWith(caches.match(req).then((r) => r || fetch(req).then((res) => {
+      const copy = res.clone();
+      caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+      return res;
+    })));
+    return;
+  }
   e.respondWith(
     fetch(req)
       .then((res) => {

@@ -6,7 +6,7 @@
 
 import * as THREE from 'three';
 import { PHYS, PRESETS, PROFILES, CARS, QUALITY, DEFAULT_QUALITY, CYCLE, WEATHER } from './config.js';
-import { createRenderer, createScene, applyPreset, applyPresetBlend, onResize } from './scene.js';
+import { createRenderer, createScene, applyPreset, applyPresetBlend, onResize, IS_COARSE } from './scene.js';
 import { buildWorld, resolveCollisions, updateCones, updatePosts, applyWorldPreset } from './world.js';
 import { buildCar, applyCarVisual } from './car.js';
 import { createCarState, stepPhysics, snapshot, snapshotInto } from './physics.js';
@@ -52,22 +52,36 @@ const world = buildWorld(ctx.scene, ctx.preset);
 applyWorldPreset(world, ctx.preset);
 
 // ---- graphics quality (caps GPU load / heat) ------------------------------
+// Shadow map is TIME-scheduled (not every Nth frame): the depth pass re-renders at most
+// shadowHz times/s. The sun follows the car texel-snapped so STATIC shadows don't shimmer
+// between refreshes; the car casts its real shadow and tracks at the (generous) cadence.
 let targetFrameMs = 1000 / 60;
-let shadowEvery = 2;
-let shadowTick = 0;
+let shadowIntervalMs = 1000 / 20; // min ms between shadow-map re-renders (per tier)
+let shadowTexel = (2 * 150) / 1024; // world metres per shadow texel — for the trackSun snap
+let lastShadowMs = -1e9; // timestamp of the last shadow depth pass
+let sunMoved = true; // sun direction changed (day/night lerp / preset jump) → refresh on next tick
+let shadowPassCount = 0; // instrumentation: shadow passes in the current 1 s window
+// adaptive-governor state (declared here so setQuality can reset it; logic lives further down)
+let govLevel = 0, govAccDown = 0, govAccUp = 0, govTick = 0, govThermal = 0;
 let layoutReady = false; // true once applyLayout() has run (handles rotation-aware sizing)
 let qualityKey = localStorage.getItem('cooldrive.quality') || DEFAULT_QUALITY;
 function setQuality(key) {
   const q = QUALITY[key] || QUALITY.medium;
   qualityKey = key;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatio));
+  const cap = IS_COARSE ? Math.min(q.pixelRatio, 1.7) : q.pixelRatio; // gentler on 3x phones
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, cap));
   renderer.setSize(window.innerWidth, window.innerHeight);
   if (layoutReady) applyLayout(); // re-apply rotation-aware size after a pixelRatio change
   ctx.sun.shadow.mapSize.set(q.shadow, q.shadow);
+  // shadow frustum half-size per tier (smaller = fewer casters per pass + denser texels)
+  const sr = q.shadowRadius, scam = ctx.sun.shadow.camera;
+  scam.left = -sr; scam.right = sr; scam.top = sr; scam.bottom = -sr; scam.updateProjectionMatrix();
+  shadowTexel = (2 * sr) / q.shadow;
   if (ctx.sun.shadow.map) { ctx.sun.shadow.map.dispose(); ctx.sun.shadow.map = null; }
-  renderer.shadowMap.needsUpdate = true;
+  renderer.shadowMap.needsUpdate = true; sunMoved = true;
   targetFrameMs = 1000 / q.fps;
-  shadowEvery = q.shadowEvery;
+  shadowIntervalMs = 1000 / q.shadowHz;
+  govLevel = 0; govAccDown = 0; govAccUp = 0; // a manual tier change is a fresh baseline for the governor
   if (world && world.setQuality) world.setQuality(key); // streaming radius per tier
   try { localStorage.setItem('cooldrive.quality', key); } catch (e) {}
 }
@@ -103,7 +117,12 @@ function disposeCar(c) {
   if (!c) return;
   c.group.traverse((o) => {
     if (o.geometry) o.geometry.dispose();
-    if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
+    if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
+      // material.dispose() does NOT free textures, so the GLB car's maps (~16 MB) would leak
+      // on every car-selector switch. Dispose any texture-valued property first.
+      for (const k in m) { const v = m[k]; if (v && v.isTexture) v.dispose(); }
+      m.dispose();
+    });
   });
   ctx.scene.remove(c.group);
 }
@@ -162,10 +181,29 @@ function resetCarState(x = SPAWN.x, z = SPAWN.z, heading = SPAWN.heading) {
 resetCarState();
 prev = snapshot(carState); curr = snapshot(carState);
 
+// The sun shadow frustum follows the car. If it slid smoothly it would shimmer between
+// the (now throttled) depth-map re-renders, so we SNAP the follow-point to the shadow
+// texel grid in the light's own view basis — the map stays pixel-stable at low refresh.
+const _sf = new THREE.Vector3(), _sr = new THREE.Vector3(), _su = new THREE.Vector3();
+const _SUP = new THREE.Vector3(0, 1, 0);
 function trackSun() {
-  ctx.sun.position.set(car.group.position.x + ctx.preset.sunPos[0], ctx.preset.sunPos[1], car.group.position.z + ctx.preset.sunPos[2]);
-  ctx.sun.target.position.set(car.group.position.x, 0, car.group.position.z);
+  const cx = car.group.position.x, cz = car.group.position.z;
+  const off = ctx.preset.sunPos;
+  const d = Math.hypot(off[0], off[1], off[2]) || 1;
+  _sf.set(-off[0] / d, -off[1] / d, -off[2] / d); // sun → car (light forward)
+  _sr.crossVectors(_sf, _SUP).normalize();        // light-right
+  _su.crossVectors(_sr, _sf).normalize();         // light-up
+  const texel = shadowTexel || 0.3;
+  // project the car onto the light view plane, round to whole texels, reconstruct
+  let tr = cx * _sr.x + cz * _sr.z, tu = cx * _su.x + cz * _su.z;
+  const tf = cx * _sf.x + cz * _sf.z;
+  tr = Math.round(tr / texel) * texel; tu = Math.round(tu / texel) * texel;
+  const tx = _sr.x * tr + _su.x * tu + _sf.x * tf;
+  const ty = _sr.y * tr + _su.y * tu + _sf.y * tf;
+  const tz = _sr.z * tr + _su.z * tu + _sf.z * tf;
+  ctx.sun.target.position.set(tx, ty, tz);
   ctx.sun.target.updateMatrixWorld();
+  ctx.sun.position.set(tx - _sf.x * d, ty - _sf.y * d, tz - _sf.z * d);
 }
 
 // ---- game flow -------------------------------------------------------------
@@ -214,14 +252,15 @@ function cyclePreset() {
   setAccent(p.neon);
   effects.setAccent(p.neon);
   el('presetName').textContent = p.name;
-  renderer.shadowMap.needsUpdate = true; // the sun jumped — refresh shadows now
+  lastPresetLabel = p.name; lastNeon = p.neon; // keep the cycle caches in sync with the manual jump
+  sunMoved = true; // the sun jumped — refresh shadows on the next scheduled tick
   if (key === 'night') ach.event('night');
 }
 
 // ---- auto day/night cycle --------------------------------------------------
 let autoCycle = true;
 try { autoCycle = (localStorage.getItem('cooldrive.autocycle') || '1') !== '0'; } catch (e) {}
-let cycleT = 0, cycleAcc = 0;
+let cycleT = 0, cycleAcc = 0, lastNeon = -1, lastPresetLabel = '';
 function updateCycle(dt) {
   if (!autoCycle) return;
   cycleT += dt / CYCLE.secondsPerLeg;
@@ -232,10 +271,11 @@ function updateCycle(dt) {
   cycleAcc += dt;
   if (cycleAcc >= 0.2) { // throttle accent / neon recolor / label
     cycleAcc = 0;
-    setAccent(bl.neon); effects.setAccent(bl.neon); world.setNeon(bl.neon);
-    el('presetName').textContent = bl.name;
+    // skip the (style-invalidating) accent + neon rewrites when the color hasn't moved
+    if (bl.neon !== lastNeon) { lastNeon = bl.neon; setAccent(bl.neon); effects.setAccent(bl.neon); world.setNeon(bl.neon); }
+    if (bl.name !== lastPresetLabel) { lastPresetLabel = bl.name; el('presetName').textContent = bl.name; }
     if (bl.night > 0.6) ach.event('night');
-    renderer.shadowMap.needsUpdate = true; // sun keeps moving
+    sunMoved = true; // the sun keeps drifting → refresh shadows on the scheduled cadence (not every frame)
   }
 }
 
@@ -332,9 +372,27 @@ bindSlider('engine', (v) => (PHYS.engine = v), (v) => v.toFixed(0));
 bindSlider('sfx', (v) => audio.setSfxVol(v / 100), (v) => v.toFixed(0));
 bindSlider('music', (v) => audio.setMusicVol(v / 100), (v) => v.toFixed(0));
 const qualitySel = el('quality');
+// A few things are locked in at page load (shading class Lambert↔PBR, MSAA, shadow-filter
+// softness) because switching them live would force a shader recompile. So when a tier change
+// needs a different one, we apply the LIVE parts immediately and prompt for a reload (with a
+// Revert) instead of silently half-applying. Signature = the three boot-fixed aspects.
+const bootQuality = qualityKey; // the tier the currently-loaded materials/MSAA/filter match
+const bootSig = (key) => { const q = QUALITY[key] || QUALITY.medium; return (key === 'high' ? 'P' : 'L') + (q.pixelRatio > 1 ? 'A' : 'a') + q.shadowFilter[0]; };
+const reloadNote = el('qualityReload');
 if (qualitySel) {
   qualitySel.value = qualityKey;
-  qualitySel.addEventListener('change', () => { setQuality(qualitySel.value); audio.sfx.ui(); });
+  qualitySel.addEventListener('change', () => {
+    setQuality(qualitySel.value); audio.sfx.ui();
+    if (reloadNote) reloadNote.classList.toggle('show', bootSig(qualitySel.value) !== bootSig(bootQuality));
+  });
+}
+if (reloadNote) {
+  const rb = el('qualityReloadBtn'), vb = el('qualityRevertBtn');
+  if (rb) rb.addEventListener('click', () => location.reload());
+  if (vb) vb.addEventListener('click', () => { // revert to the fully-consistent (boot) tier — no reload needed
+    qualitySel.value = bootQuality; setQuality(bootQuality); audio.sfx.ui();
+    reloadNote.classList.remove('show');
+  });
 }
 const weatherSel = el('weatherSel');
 if (weatherSel) {
@@ -444,6 +502,52 @@ function drainAchievements() {
   if (any) hud.renderAchievements(ach.progress());
 }
 
+// ---- adaptive quality governor --------------------------------------------
+// The safety net that makes "runs cool on flagships, playable on old phones" true rather than
+// tuned-for-today. It watches sustained frame-rate (always) plus native thermalState (when the
+// Capacitor plugin is present) and steps render load DOWN a ladder, recovering when things cool.
+// It drives the GPU knobs DIRECTLY — never setQuality(), which would persist and clobber the
+// user's chosen tier — and recovery never exceeds that tier. Steps reuse only pre-existing state
+// (pixelRatio / shadow cadence / fps), so no shader recompiles.
+// govLevel/govAcc*/govThermal are declared up in the quality section (setQuality resets them).
+// govLevel: 0 = user's full tier; 1..GOV_MAX progressively lighter. govThermal: 0 nominal .. 3
+// critical — the WKWebView host (ios/App/App/AppDelegate.swift) pushes ProcessInfo.thermalState
+// into window.__thermalState; absent on web, so the governor there runs on the fps signal alone.
+const GOV_MAX = 4;
+const GOV_PR = [1, 0.85, 0.72, 0.62, 0.55];      // pixelRatio fraction of the tier cap
+const GOV_SHADOW = [1, 1, 1.6, 2.4, 3.5];        // shadow-interval multiplier (slower cadence)
+const GOV_FPS = [0, 0, 0, 45, 30];               // 0 = keep the tier's fps; else force this cap
+function applyGovLevel(level) {
+  govLevel = Math.max(0, Math.min(GOV_MAX, level));
+  const q = QUALITY[qualityKey] || QUALITY.medium;
+  const cap = IS_COARSE ? Math.min(q.pixelRatio, 1.7) : q.pixelRatio;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, cap * GOV_PR[govLevel]));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (layoutReady) applyLayout();
+  shadowIntervalMs = (1000 / q.shadowHz) * GOV_SHADOW[govLevel];
+  targetFrameMs = 1000 / (GOV_FPS[govLevel] || q.fps);
+  sunMoved = true; // frustum unchanged but force a fresh shadow after the pixelRatio realloc
+}
+function updateGovernor(dt) {
+  govTick += dt;
+  if (govTick < 1) return; // evaluate ~1x/s
+  const elapsed = govTick; govTick = 0;
+  if (typeof window.__thermalState === 'number') govThermal = window.__thermalState; // native heat signal
+  const q = QUALITY[qualityKey] || QUALITY.medium;
+  const targetFps = GOV_FPS[govLevel] || q.fps;
+  // Web fps signal is only trustworthy as a SUSTAINED miss (rAF timestamps are vsync-quantized
+  // on iOS), so we require the EMA to sit well below target for several seconds before stepping.
+  const fpsDeficit = running && fpsEMA < targetFps * 0.82;
+  const hot = govThermal >= 2; // serious / critical
+  if (hot || fpsDeficit) {
+    govAccUp = 0; govAccDown += elapsed;
+    if (govLevel < GOV_MAX && govAccDown >= (hot ? 3 : 6)) { govAccDown = 0; applyGovLevel(govLevel + 1); }
+  } else if (govThermal === 0 && fpsEMA > targetFps * 0.95) {
+    govAccDown = 0; govAccUp += elapsed;
+    if (govLevel > 0 && govAccUp >= 30) { govAccUp = 0; applyGovLevel(govLevel - 1); } // recover slowly
+  } else { govAccDown = 0; govAccUp = 0; } // warm-but-stable → hold
+}
+
 // ---- main loop -------------------------------------------------------------
 const MAX_STEPS = 8;
 let wasBoosting = false;
@@ -461,9 +565,14 @@ let lastFrameTime = 0;
 
 function frame(now) {
   requestAnimationFrame(frame);
-  // frame-rate cap: on high-refresh displays this is the single biggest heat saver
-  if (now && now - lastFrameTime < targetFrameMs - 1.5) return;
-  lastFrameTime = now || 0;
+  // frame-rate cap: on high-refresh displays this is the single biggest heat saver.
+  // Idle menus don't need the full rate — cap them at 30 fps.
+  const cap = running ? targetFrameMs : Math.max(targetFrameMs, 1000 / 30);
+  if (now && now - lastFrameTime < cap - 1.5) return;
+  // advance by whole cap intervals (remainder-carry) so a 45/30-fps target actually delivers that
+  // cadence instead of quantizing up to the panel's vsync; snap to `now` if we fell far behind
+  // (e.g. the tab was backgrounded) so we don't burst-render to catch up.
+  lastFrameTime = (now && now - lastFrameTime < cap * 2) ? lastFrameTime + cap : (now || 0);
   let dt = clock.getDelta();
   if (dt > 0.1) dt = 0.1;
 
@@ -539,8 +648,11 @@ function frame(now) {
           if (regionsSeen > 1 && reg.name !== 'Home Turf') hud.toast({ icon: '🧭', name: reg.name, desc: 'New region discovered' }, 'NEW REGION', 'region');
         }
       }
+      // threshold achievements read running totals — checking at 4 Hz (not 60) is imperceptible
+      // and avoids a fresh stats object + 23 predicate tests every frame. (Event-driven unlocks
+      // still fire instantly via ach.event.)
+      ach.update({ score: scoring.st.score, bestCombo, longestDrift: scoring.st.longestDrift, topSpeed, distance, trackDriftTime: trackDriftSec, procDriftTime: procDriftSec, farthest, nearMisses: nearMissTotal, bestLinks: scoring.st.bestLinks, ringRuns: ringRunTotal, regionsSeen });
     }
-    ach.update({ score: scoring.st.score, bestCombo, longestDrift: scoring.st.longestDrift, topSpeed, distance, trackDriftTime: trackDriftSec, procDriftTime: procDriftSec, farthest, nearMisses: nearMissTotal, bestLinks: scoring.st.bestLinks, ringRuns: ringRunTotal, regionsSeen });
   }
 
   // stream chunks around the car + maybe rebase the origin. Runs AFTER physics and
@@ -597,10 +709,17 @@ function frame(now) {
   wasBoosting = carState.boosting;
   drainAchievements();
 
-  // shadow update: normally throttled to every Nth frame, but forced immediately when
-  // the streamer signals it changed the scene (chunk activated/unloaded, or a rebase) —
-  // otherwise fresh casters render against a stale shadow map for a frame or two.
-  if (world.consumeShadowDirty() || ++shadowTick >= shadowEvery) { renderer.shadowMap.needsUpdate = true; shadowTick = 0; }
+  if (running) updateGovernor(dt); // adaptive step-down under sustained load / heat (play only)
+
+  // shadow update: TIME-scheduled at shadowHz (not every frame). Forced immediately when
+  // the streamer rebases (every caster moved) or the sun direction jumped; the cadence
+  // otherwise just tracks the slow sun drift + static casters entering the followed frustum.
+  // Idle menus refresh 4x less often.
+  const nowMs = now || lastFrameTime;
+  const shadowMul = running ? 1 : 4;
+  if (world.consumeShadowDirty() || sunMoved || nowMs - lastShadowMs >= shadowIntervalMs * shadowMul) {
+    renderer.shadowMap.needsUpdate = true; lastShadowMs = nowMs; sunMoved = false; shadowPassCount++;
+  }
   renderer.render(ctx.scene, ctx.camera);
   updateHud(dt); // dev perf overlay (read renderer.info AFTER the render)
 }
@@ -643,17 +762,23 @@ dbgHud.style.display = hudOn ? 'block' : 'none';
 window.addEventListener('keydown', (e) => {
   if (e.key === '`' || e.code === 'Backquote') { hudOn = !hudOn; dbgHud.style.display = hudOn ? 'block' : 'none'; }
 });
-let fpsEMA = 60, hudAcc = 0;
+let fpsEMA = 60, hudAcc = 0, shadowSecAcc = 0, shadowRate = 0;
 function updateHud(dtSec) {
-  if (!hudOn) return;
+  // ALWAYS-ON instrumentation (the adaptive governor + the shadow-rate readout need these
+  // even while the dev HUD is hidden — it costs ~3 ops/frame).
   if (dtSec > 0) fpsEMA += (1 / dtSec - fpsEMA) * 0.1;
+  shadowSecAcc += dtSec;
+  if (shadowSecAcc >= 1) { shadowRate = shadowPassCount / shadowSecAcc; shadowPassCount = 0; shadowSecAcc = 0; }
+  if (!hudOn) return;
   hudAcc += dtSec;
   if (hudAcc < 0.25) return; // refresh 4x/s — readable, cheap
   hudAcc = 0;
   const inf = renderer.info, st = world.streamer;
+  const gov = govLevel > 0 ? '↓' + govLevel : ''; // adaptive-governor step-down marker
   dbgHud.textContent =
     `fps   ${fpsEMA.toFixed(0).padStart(3)}    ${(1000 / Math.max(fpsEMA, 1)).toFixed(1)} ms\n` +
     `draws ${String(inf.render.calls).padStart(4)}   tris ${(inf.render.triangles / 1000).toFixed(0)}k\n` +
+    `shdw  ${shadowRate.toFixed(0).padStart(4)}/s  q ${qualityKey[0].toUpperCase()}${gov}\n` +
     `geo   ${String(inf.memory.geometries).padStart(4)}   tex  ${String(inf.memory.textures).padStart(3)}\n` +
     `chunk ${String(st.chunkCount).padStart(4)}   queue ${st.queueDepth}\n` +
     `pos   ${carState.x.toFixed(0)}, ${carState.z.toFixed(0)}   home ${world.homeDist(carState.x, carState.z).toFixed(0)} m`;

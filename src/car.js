@@ -80,11 +80,25 @@ function buildGLBCar(def) {
       const flat = def.flatShading !== false;
       model.traverse((o) => {
         if (!o.isMesh) return;
+        // The car casts a real shaped shadow. That's cheap now: the shadow map is TIME-scheduled
+        // (main.js), so the car's ~5k tris just join the depth pass at the fixed cadence — it does
+        // NOT force an every-frame re-render. Also strip the material to the cheapest correct PBR path.
         o.castShadow = true; o.receiveShadow = false;
-        if (flat) {
-          const mats = Array.isArray(o.material) ? o.material : [o.material];
-          mats.forEach((m) => { if (m) { m.flatShading = true; m.needsUpdate = true; } });
-        }
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        mats.forEach((m) => {
+          if (!m) return;
+          // FrontSide: GLBs load DoubleSide → uncullable interior faces double the car's
+          // fragments (it's the biggest near-camera object). Drop the normal + metal/rough
+          // maps (flatShading fights the normal map anyway) with constants so the car doesn't
+          // render fully-metallic once the MR texture is gone. Dispose the freed textures.
+          if (m.side !== THREE.FrontSide) m.side = THREE.FrontSide;
+          if (m.normalMap) { m.normalMap.dispose(); m.normalMap = null; }
+          if (m.metalnessMap) { m.metalnessMap.dispose(); m.metalnessMap = null; }
+          if (m.roughnessMap) { m.roughnessMap.dispose(); m.roughnessMap = null; }
+          m.metalness = 0.2; m.roughness = 0.6;
+          if (flat) m.flatShading = true;
+          m.needsUpdate = true;
+        });
       });
       chassis.add(model);
 

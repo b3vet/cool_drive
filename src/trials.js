@@ -76,13 +76,17 @@ export function createTrials({ scene, streamer, scoring, hud, onComplete }) {
     else beacon.visible = false;
   }
 
+  let _hudCache = ''; // last innerHTML written — skip the re-parse when unchanged
   function updateHud() {
     if (!trialHud) return;
     if (state === 'ARMED' || state === 'RUNNING') {
       trialHud.classList.add('show');
       const t = state === 'RUNNING' ? active.time : 0;
-      trialHud.innerHTML = `<div class="tl">RING RUN ${active.next}/${RING_COUNT}</div><div class="tv">${t.toFixed(1)}s</div>`;
+      // t.toFixed(1) changes ~10x/s (not 60), so this re-parses the HTML ~10x/s instead of every frame
+      const html = `<div class="tl">RING RUN ${active.next}/${RING_COUNT}</div><div class="tv">${t.toFixed(1)}s</div>`;
+      if (html !== _hudCache) { _hudCache = html; trialHud.innerHTML = html; }
     } else {
+      _hudCache = '';
       trialHud.classList.remove('show');
     }
   }

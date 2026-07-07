@@ -15,7 +15,25 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 // everything beyond is generated on the fly by the streamer.
 const RES = { x0: -1000, x1: 490, z0: -1000, z1: 490 };
 
+// Big flat surfaces + most scenery dominate the screen; under MeshStandardMaterial every lit
+// fragment pays the full 7-light GGX BRDF (5 PointLights + sun + hemi are all compiled in). On
+// the mobile-default Medium/Low tiers we build the same materials as the cheap MeshLambertMaterial
+// (diffuse per-pixel; still fog/shadow/emissive/flatShading/vertexColors/instanceColor capable).
+// The class is fixed at BOOT from the persisted tier — like the shadow filter — so there's no
+// runtime recompile; changing High<->Medium in settings takes effect on the next launch. High
+// keeps full PBR. See OPTIMIZATION.md.
+let _cheapShading = true;
+try { _cheapShading = (localStorage.getItem('cooldrive.quality') || 'medium') !== 'high'; } catch (e) {}
+
 function mat(color, opts = {}) {
+  if (_cheapShading) {
+    return new THREE.MeshLambertMaterial({
+      color,
+      flatShading: opts.flat ?? true,
+      emissive: opts.emissive ?? 0x000000,
+      emissiveIntensity: opts.emissiveIntensity ?? 1,
+    });
+  }
   return new THREE.MeshStandardMaterial({
     color,
     flatShading: opts.flat ?? true,
@@ -24,6 +42,20 @@ function mat(color, opts = {}) {
     emissive: opts.emissive ?? 0x000000,
     emissiveIntensity: opts.emissiveIntensity ?? 1,
   });
+}
+
+// like mat() but for the directly-specified big surfaces (asphalt / track / walls): keeps
+// polygonOffset / vertexColors / side / transparency, drops the PBR-only params on the Lambert
+// path (Lambert ignores roughness/metalness — wet-road sheen just won't apply on Med/Low).
+function bigStd(params) {
+  if (_cheapShading) {
+    const p = {};
+    for (const k of ['color', 'emissive', 'emissiveIntensity', 'flatShading', 'vertexColors', 'side', 'transparent', 'opacity', 'polygonOffset', 'polygonOffsetFactor', 'polygonOffsetUnits']) {
+      if (params[k] !== undefined) p[k] = params[k];
+    }
+    return new THREE.MeshLambertMaterial(p);
+  }
+  return new THREE.MeshStandardMaterial(params);
 }
 
 function mulberry32(seed) {
@@ -108,7 +140,7 @@ function buildHomeRegion(scene, preset) {
   const W = WORLD.roadWidth;
 
   // shared materials
-  const asphalt = new THREE.MeshStandardMaterial({ color: 0x232730, roughness: 0.95, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  const asphalt = bigStd({ color: 0x232730, roughness: 0.95, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
   const edgeMat = mat(preset.neon, { emissive: preset.neon, emissiveIntensity: 0.5, roughness: 0.5 });
   // render the neon edge lines ON TOP of the road surface at ALL distances: the surface
   // has polygonOffset -1, so without a stronger offset the edges lose the depth test at
@@ -235,7 +267,7 @@ function buildHomeRegion(scene, preset) {
   const nT = trackSamples.length;
 
   // fresh-asphalt surface (a touch lighter than the roads) + glowing edge lines
-  const trackMat = new THREE.MeshStandardMaterial({ color: 0x2b3038, roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  const trackMat = bigStd({ color: 0x2b3038, roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
   group.add(buildRibbon(trackSamples, true, 0, TW + 3, 0.03, trackMat)); // asphalt reaches under the walls
   group.add(buildRibbon(trackSamples, true, TW / 2 - 0.35, 0.5, 0.05, edgeMat));
   group.add(buildRibbon(trackSamples, true, -TW / 2 + 0.35, 0.5, 0.05, edgeMat));
@@ -292,7 +324,7 @@ function buildHomeRegion(scene, preset) {
   // ---- walls: inner ring closed; outer ring OPEN at the entrance gap --------
   // Painted as alternating red/white motorsport barrier panels (vertex colours)
   // so the boundary reads as a race barrier, not a flat black wall.
-  const wallMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0.05, flatShading: true, side: THREE.DoubleSide });
+  const wallMat = bigStd({ vertexColors: true, roughness: 0.82, metalness: 0.05, flatShading: true, side: THREE.DoubleSide });
   const wallCols = [new THREE.Color(0xe4e7ee), new THREE.Color(0xcf3b33)]; // white, red
   const PANEL = 3; // samples per colour panel
   trackWallTopMat = mat(preset.neon, { emissive: preset.neon, emissiveIntensity: 0.65, roughness: 0.4 });
@@ -653,6 +685,10 @@ function buildHomeRegion(scene, preset) {
   scene.add(dust); // dust follows the camera in render space — not the (rebaseable) home group
 
   function updateAtmosphere(cam, dt) {
+    // dust fades to opacity 0 in the rain — skip the per-frame JS loop AND the full VBO
+    // re-upload while it's invisible (three doesn't cull opacity-0 Points on its own).
+    if (dustMat.opacity < 0.01) { if (dust.visible) dust.visible = false; return; }
+    if (!dust.visible) dust.visible = true;
     for (let i = 0; i < DUST; i++) {
       let x = dustPos[i * 3] + dustVel[i * 3] * dt;
       let y = dustPos[i * 3 + 1] + dustVel[i * 3 + 1] * dt;
@@ -919,21 +955,23 @@ export function resolveCollisions(state, world) {
   return _colOut;
 }
 
+// reused scratch for updatePosts (called every render frame → no per-frame allocation)
+const _upM = new THREE.Matrix4();
+const _upRot = new THREE.Matrix4();
+const _upPivot = new THREE.Matrix4().makeTranslation(0, 1.2, 0);
+const _upAxis = new THREE.Vector3();
+
 // Animate knocked-over posts (called each render frame).
 export function updatePosts(world, dt) {
   let changed = false;
-  const m = new THREE.Matrix4();
-  const rot = new THREE.Matrix4();
-  const pivot = new THREE.Matrix4().makeTranslation(0, 1.2, 0);
-  const axis = new THREE.Vector3();
   for (const p of world.postList) {
     if (!p.knocking || p._settled) continue;
     p.knock = Math.min(1, p.knock + dt * 3.2);
     const tilt = p.knock * (Math.PI / 2) * 0.96;
-    axis.set(Math.cos(p.dir), 0, -Math.sin(p.dir)).normalize();
-    rot.makeRotationAxis(axis, tilt);
-    m.makeTranslation(p.x, 0, p.z).multiply(rot).multiply(pivot);
-    world.posts.setMatrixAt(p.i, m);
+    _upAxis.set(Math.cos(p.dir), 0, -Math.sin(p.dir)).normalize();
+    _upRot.makeRotationAxis(_upAxis, tilt);
+    _upM.makeTranslation(p.x, 0, p.z).multiply(_upRot).multiply(_upPivot);
+    world.posts.setMatrixAt(p.i, _upM);
     changed = true;
     if (p.knock >= 1) { p.fallen = true; p._settled = true; }
   }

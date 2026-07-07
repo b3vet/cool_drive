@@ -30,6 +30,10 @@ export function createHUD() {
 
   let comboPulse = 0;
   let compassItems = []; // { arr: <el>, rx, rz } — render-coord targets
+  // last-written cache: WebKit dirties style/layout/paint on EVERY textContent/style write —
+  // even an identical one — and every HUD element carries a text-shadow glow that re-rasters
+  // at 3x DPR. Comparing before writing keeps the DOM pipeline idle on unchanged frames.
+  const last = {};
 
   // rebuild the compass chip row (called at a few Hz); arrows are rotated per-frame
   function setCompass(targets) {
@@ -51,19 +55,24 @@ export function createHUD() {
   }
 
   function update(st, carState, dt) {
-    score.textContent = fmt(st.score);
-    best.textContent = 'BEST ' + fmt(st.bestDrift);
+    const scoreTxt = fmt(st.score);
+    if (last.score !== scoreTxt) { last.score = scoreTxt; score.textContent = scoreTxt; }
+    const bestTxt = 'BEST ' + fmt(st.bestDrift);
+    if (last.best !== bestTxt) { last.best = bestTxt; best.textContent = bestTxt; }
 
     // live combo chip
     if (st.active && st.banked > 0.5) {
       combo.classList.add('show');
       const m = st.multiplier;
-      comboVal.textContent = '×' + m.toFixed(1);
-      banked.textContent = '+' + fmt(st.banked);
-      const hue = 140 - Math.min(m / 10, 1) * 110;
-      combo.style.setProperty('--c', `hsl(${hue} 90% 55%)`);
+      const cvTxt = '×' + m.toFixed(1);
+      if (last.comboVal !== cvTxt) { last.comboVal = cvTxt; comboVal.textContent = cvTxt; }
+      const bkTxt = '+' + fmt(st.banked);
+      if (last.banked !== bkTxt) { last.banked = bkTxt; banked.textContent = bkTxt; }
+      const hue = Math.round(140 - Math.min(m / 10, 1) * 110); // quantize → skip most --c rewrites
+      if (last.hue !== hue) { last.hue = hue; combo.style.setProperty('--c', `hsl(${hue} 90% 55%)`); }
       const scale = 1 + Math.min(m / 10, 1) * 0.5 + comboPulse;
-      combo.style.transform = `translateX(-50%) scale(${scale.toFixed(3)})`;
+      const tf = `translateX(-50%) scale(${scale.toFixed(3)})`; // compositor-only (layer promoted)
+      if (last.comboTf !== tf) { last.comboTf = tf; combo.style.transform = tf; }
       comboPulse = Math.max(0, comboPulse - dt * 4);
       combo.classList.toggle('hot', st.heat > 0.05); // style heat from near-miss shaves
     } else {
@@ -121,12 +130,15 @@ export function createHUD() {
       for (const it of compassItems) {
         const dx = it.rx - carState.x, dz = it.rz - carState.z;
         const lx = dx * ch - dz * sh, lz = dx * sh + dz * ch;
-        it.arr.style.transform = `rotate(${Math.atan2(lx, -lz).toFixed(3)}rad)`;
+        const rotS = Math.atan2(lx, -lz).toFixed(2); // ~0.01 rad steps → skip identical writes
+        if (it._rot !== rotS) { it._rot = rotS; it.arr.style.transform = `rotate(${rotS}rad)`; }
       }
     }
 
-    speed.textContent = Math.round(Math.abs(carState.forwardSpeed) * 3.6);
-    boostFill.style.width = (carState.boost * 100).toFixed(0) + '%';
+    const spd = String(Math.round(Math.abs(carState.forwardSpeed) * 3.6));
+    if (last.speed !== spd) { last.speed = spd; speed.textContent = spd; }
+    const bfill = 'scaleX(' + carState.boost.toFixed(3) + ')'; // scaleX = compositor-only (vs width = layout)
+    if (last.boost !== bfill) { last.boost = bfill; boostFill.style.transform = bfill; }
     boostFill.classList.toggle('ready', carState.boost > 0.99);
     boostFill.classList.toggle('active', carState.boosting);
     driftFloat.classList.toggle('show', carState.drifting);

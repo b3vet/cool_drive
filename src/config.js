@@ -60,13 +60,27 @@ export const PHYS = {
 };
 
 // ---- Graphics quality presets (reduce GPU load / heat) ---------------------
-// pixelRatio is capped against the device ratio. shadow = shadow-map size.
-// fps caps the render rate (skips frames above it). shadowEvery throttles how
-// often the shadow map re-renders (every Nth frame).
+// pixelRatio is capped against the device ratio (and further to 1.7 on touch
+// phones — see main.js setQuality). shadow = shadow-map size. fps caps the render
+// rate (skips frames above it). shadowHz = target shadow-map refresh rate (the
+// depth pass is time-scheduled, not every-Nth-frame — see main.js). shadowRadius = the
+// sun-shadow frustum half-size (smaller = fewer casters + denser/crisper texels).
+// shadowFilter is PCFSoft ('soft') on EVERY tier: the 1-tap 'basic' filter stair-stepped the
+// car shadow into aliased blocks on Medium/Low, and r160 has no cheaper soft option (plain PCF
+// is 17 taps > PCFSoft's 16). The big thermal wins are elsewhere (Lambert, pixelRatio, fog cull),
+// so soft shadows everywhere are worth the receiver taps.
 export const QUALITY = {
-  high: { label: 'High', pixelRatio: 2, shadow: 2048, fps: 60, shadowEvery: 1 },
-  medium: { label: 'Medium', pixelRatio: 1.5, shadow: 1024, fps: 60, shadowEvery: 2 },
-  low: { label: 'Low (cool & quiet)', pixelRatio: 1, shadow: 512, fps: 45, shadowEvery: 3 },
+  // shadowHz kept high enough that the (real, shaped) car shadow tracks the moving car without
+  // visible lag; High is still cut from the old 60. Cheaper depth pass comes from the smaller
+  // per-tier map + tighter shadowRadius + fewer casters (trunks don't cast), not the filter.
+  // Medium is the default (incl. mobile). It renders at High's sharpness — same 1.7 pixelRatio cap
+  // on phones and a shadow texel density (2*110/1536 ≈ 0.14 m) matching High's — but keeps the cheap
+  // Lambert shading. On this matte low-poly art (roughness ~1, metalness 0) Lambert is visually
+  // ~identical to High's full PBR, so Medium looks like High while running far cooler. High exists
+  // for anyone who wants true PBR (and a bigger 2048 shadow); Low is the cool-and-quiet floor.
+  high: { label: 'High (full PBR)', pixelRatio: 2, shadow: 2048, fps: 60, shadowHz: 40, shadowFilter: 'soft', shadowRadius: 150 },
+  medium: { label: 'Medium (recommended)', pixelRatio: 1.7, shadow: 1536, fps: 60, shadowHz: 30, shadowFilter: 'soft', shadowRadius: 110 },
+  low: { label: 'Low (cool & quiet)', pixelRatio: 1, shadow: 512, fps: 45, shadowHz: 15, shadowFilter: 'soft', shadowRadius: 85 },
 };
 export const DEFAULT_QUALITY = 'medium';
 
@@ -219,16 +233,19 @@ export const WORLD = {
 export const CHUNK = {
   size: 256, // metres per chunk edge
   simRing: 1, // Chebyshev radius of the collision/active set (3x3)
-  visualRing: { low: 3, medium: 4, high: 4 }, // render radius by quality tier
+  // render radius by quality tier. Ring 3's far edge (~768-896 m) already reaches the
+  // fog wall (fogFar 700-860), so a 4th ring only renders geometry that fogs to 100% —
+  // pure waste. Kept at 3 (2 on Low). See OPTIMIZATION.md.
+  visualRing: { low: 2, medium: 3, high: 3 },
   buildMs: { low: 1.5, medium: 2.5, high: 2.5 }, // per-frame mesh-build time slice
   rebaseAt: 2048, // floating-origin rebase threshold (metres from render origin)
   // authored home region reservation (inclusive chunk range) — never streamed/unloaded
   homeMin: { cx: -4, cz: -4 }, homeMax: { cx: 1, cz: 1 },
   perChunkCaps: { trees: 110, rocks: 60, bushes: 90, buildings: 26, cones: 18 },
   // Floor for recyclable meshes per species. chunks.js raises this to the actual
-  // worst-case resident-chunk count derived from visualRing ((2*(vis+1)+1)^2 = 121)
-  // so a chunk under the car can never fail to check out its scenery + colliders.
-  poolSlots: 121,
+  // worst-case resident-chunk count derived from visualRing ((2*(vis+1)+1)^2 = 81 at
+  // visualRing 3) so a chunk under the car can never fail to check out its scenery.
+  poolSlots: 81,
   roadGeoPool: 72, roadGeoVerts: 5200, // pooled road ribbon slots + max verts each
   lightCap: 5, // max shadowless PointLights across all active landmark circuits
 };

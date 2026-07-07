@@ -138,15 +138,18 @@ class Smoke {
       uniforms: {
         map: { value: softSprite() },
         color: { value: new THREE.Color(SMOKE.color) },
+        maxPoint: { value: 120 }, // clamp sprite screen size — near-camera smoke can otherwise
+        // blow up to a full screen of blended overdraw during a drift (the core loop)
       },
       vertexShader: `
         attribute float size;
         attribute float alpha;
         varying float vAlpha;
+        uniform float maxPoint;
         void main() {
           vAlpha = alpha;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = size * (320.0 / max(-mv.z, 0.1));
+          gl_PointSize = min(size * (320.0 / max(-mv.z, 0.1)), maxPoint);
           gl_Position = projectionMatrix * mv;
         }
       `,
@@ -197,8 +200,11 @@ class Smoke {
     let dirty = false; // gate GPU uploads on actual buffer writes, not on liveness
     for (let i = 0; i < this.max; i++) {
       if (this.life[i] <= 0) {
-        if (this.alpha[i] !== 0) {
-          this.alpha[i] = 0;
+        // a dead slot keeps its last (grown) size, so with no drawRange it still rasterizes a
+        // fat point sprite every frame that samples the texture then discards — zero the size
+        // (gl_PointSize 0 → GLES min 1px) so dead slots cost ~1 fragment instead of thousands.
+        if (this.alpha[i] !== 0 || this.size[i] !== 0) {
+          this.alpha[i] = 0; this.size[i] = 0;
           dirty = true;
         }
         continue;
@@ -228,6 +234,7 @@ class Smoke {
     for (let i = 0; i < this.max; i++) {
       this.life[i] = 0;
       this.alpha[i] = 0;
+      this.size[i] = 0; // don't leave a stale grown size that keeps rasterizing after a reset
     }
   }
 }

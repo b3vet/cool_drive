@@ -3,14 +3,38 @@
 // ============================================================================
 
 import * as THREE from 'three';
-import { PRESETS, WORLD, CAM } from './config.js';
+import { PRESETS, WORLD, CAM, QUALITY, DEFAULT_QUALITY } from './config.js';
 
+// coarse pointer = touch phone/tablet → gentler GPU defaults (heat budget)
+export const IS_COARSE = (typeof window !== 'undefined') && (
+  (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+  /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+
+// Medium/Low tiers shade the big surfaces (ground here, roads/scenery in world.js) with cheap
+// Lambert instead of full PBR. Fixed at boot from the persisted tier (see world.js mat()).
+let _cheapShading = true;
+try { _cheapShading = (localStorage.getItem('cooldrive.quality') || DEFAULT_QUALITY) !== 'high'; } catch (e) {}
+
+// The context-creation flags (antialias / alpha / stencil) and the shadow FILTER
+// type are frozen at renderer construction — changing them later forces a full
+// shader recompile — so we pick them ONCE here from the persisted quality tier.
+// pixelRatio, shadow-map SIZE, cadence and draw distance still change live per tier.
 export function createRenderer(mount) {
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  let qk = DEFAULT_QUALITY;
+  try { qk = localStorage.getItem('cooldrive.quality') || DEFAULT_QUALITY; } catch (e) {}
+  const q = QUALITY[qk] || QUALITY.medium;
+  const renderer = new THREE.WebGLRenderer({
+    antialias: q.pixelRatio > 1, // MSAA is wasted under 1x; Low renders at 1x so skip it
+    powerPreference: 'high-performance',
+    alpha: false, // opaque canvas — the page never shows through, so skip compositor blending
+    stencil: false, // we never use the stencil buffer
+  });
+  const cap = IS_COARSE ? Math.min(q.pixelRatio, 1.7) : q.pixelRatio; // 3x phones: 1.7 is ~free vs 2.0
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, cap));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // PCFSoft = 16 taps/receiver-fragment; Basic = 1. Hard edges suit the low-poly art.
+  renderer.shadowMap.type = q.shadowFilter === 'soft' ? THREE.PCFSoftShadowMap : THREE.BasicShadowMap;
   renderer.shadowMap.autoUpdate = false; // we trigger updates ourselves (throttled) to save GPU
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.18;
@@ -111,8 +135,10 @@ export function createScene() {
   scene.add(sun);
   scene.add(sun.target);
 
-  // ground
-  const groundMat = new THREE.MeshStandardMaterial({ color: 0x3b3f4a, roughness: 0.96, metalness: 0 });
+  // ground — the single biggest screen-area surface, so its per-fragment cost matters most
+  const groundMat = _cheapShading
+    ? new THREE.MeshLambertMaterial({ color: 0x3b3f4a })
+    : new THREE.MeshStandardMaterial({ color: 0x3b3f4a, roughness: 0.96, metalness: 0 });
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.groundSize, WORLD.groundSize), groundMat);
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
@@ -156,6 +182,7 @@ export function applyPreset(ctx, renderer, key) {
 
   // stars: bright at night, faint at dawn, off at golden hour
   ctx.starMat.opacity = key === 'night' ? 0.9 : key === 'dawn' ? 0.12 : 0;
+  ctx.stars.visible = ctx.starMat.opacity > 0.01; // opacity-0 Points still draw + rasterize otherwise
 
   ctx.preset = p;
   ctx.presetKey = key;
@@ -199,6 +226,7 @@ export function applyPresetBlend(ctx, renderer, ka, kb, t) {
   ctx.sunDiscMat.opacity = L(na ? 0.85 : 0.95, nb ? 0.85 : 0.95);
   ctx.sunDisc.scale.setScalar(L(na ? 0.7 : 1, nb ? 0.7 : 1));
   ctx.starMat.opacity = L(starOp(ka), starOp(kb));
+  ctx.stars.visible = ctx.starMat.opacity > 0.01; // skip the 700-point draw when fully faded
   _blend.neon = LC(_bNeon, a.neon, b.neon).getHex();
   _blend.night = L(na, nb);
   _blend.name = t < 0.5 ? a.name : b.name;

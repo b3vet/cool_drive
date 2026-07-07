@@ -105,22 +105,38 @@ export function createInput() {
   // gas + handbrake (+ boost) hold simultaneously.
   const TAP_CONTROLS = '#gearBtn, #camBtn, #radio, #settings, #startScreen';
   let boostBtnEl = null;
-  function recomputeTouches(list) {
+  // Classify each touch ONCE (at touchstart) instead of hit-testing every touch on every
+  // touchmove: document.elementFromPoint forces a synchronous style/layout flush, and thumbs
+  // resting on gas/brake fire touchmove up to 120x/s. 'zone' touches still re-resolve gas/brake/
+  // handbrake by pure math each move (so sliding between them works); 'boost'/'ui' stay put.
+  const touchClass = new Map(); // touch.identifier -> 'boost' | 'ui' | 'zone'
+  function classify(t) {
+    // elementFromPoint uses the on-screen (post-transform) hit test, so raw client coords
+    // correctly resolve buttons even when the game is rotated to landscape.
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    if (el && el.closest) {
+      if (el.closest('#btnBoostM')) return 'boost';
+      if (el.closest(TAP_CONTROLS)) return 'ui';
+    }
+    return 'zone';
+  }
+  function recomputeTouches(list, changed) {
+    if (changed) for (const t of changed) if (!touchClass.has(t.identifier)) touchClass.set(t.identifier, classify(t));
     let g = false, b = false, h = false, bo = false;
+    const seen = new Set();
     for (const t of list) {
-      // elementFromPoint uses the on-screen (post-transform) hit test, so raw
-      // client coords correctly resolve buttons even when the game is rotated.
-      const el = document.elementFromPoint(t.clientX, t.clientY);
-      if (el && el.closest) {
-        if (el.closest('#btnBoostM')) { bo = true; continue; } // boost button (a held control)
-        if (el.closest(TAP_CONTROLS)) continue; // menu/gear/radio — not a driving control
-      }
-      const gc = gameCoords(t.clientX, t.clientY);
+      seen.add(t.identifier);
+      let cls = touchClass.get(t.identifier);
+      if (cls === undefined) { cls = classify(t); touchClass.set(t.identifier, cls); } // safety net
+      if (cls === 'boost') { bo = true; continue; } // boost button (a held control)
+      if (cls === 'ui') continue; // menu/gear/radio — not a driving control
+      const gc = gameCoords(t.clientX, t.clientY); // pure math — no DOM hit-test
       const z = zoneOf(gc.x, gc.y, gc.W, gc.H);
       if (z === 'gas') g = true;
       else if (z === 'brake') b = true;
       else if (z === 'handbrake') h = true;
     }
+    for (const id of touchClass.keys()) if (!seen.has(id)) touchClass.delete(id); // drop lifted touches
     touch.throttle = g;
     touch.brake = b;
     touch.handbrake = h;
@@ -129,7 +145,7 @@ export function createInput() {
     if (boostBtnEl) boostBtnEl.classList.toggle('active', bo);
   }
   function bindZones() {
-    const onTouch = (e) => recomputeTouches(e.touches);
+    const onTouch = (e) => recomputeTouches(e.touches, e.changedTouches);
     // passive: no preventDefault needed — body has touch-action:none + user-scalable=no
     window.addEventListener('touchstart', onTouch, { passive: true });
     window.addEventListener('touchmove', onTouch, { passive: true });

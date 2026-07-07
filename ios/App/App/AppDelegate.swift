@@ -21,7 +21,31 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         pinAudioSession()
+        // Feed the device thermal state to the web layer's adaptive quality governor
+        // (main.js reads window.__thermalState: 0 nominal .. 3 critical) so it can step
+        // render load down before the phone gets hot and recover when it cools.
+        NotificationCenter.default.addObserver(self, selector: #selector(thermalStateChanged),
+            name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.pushThermalState() } // after the webview loads
         return true
+    }
+
+    @objc private func thermalStateChanged() { pushThermalState() }
+
+    // Map ProcessInfo.thermalState → 0..3 and set it on window.__thermalState in the WKWebView.
+    private func pushThermalState() {
+        let level: Int
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: level = 0
+        case .fair: level = 1
+        case .serious: level = 2
+        case .critical: level = 3
+        @unknown default: level = 0
+        }
+        DispatchQueue.main.async {
+            let vc = self.window?.rootViewController as? CAPBridgeViewController
+            vc?.webView?.evaluateJavaScript("window.__thermalState = \(level);", completionHandler: nil)
+        }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
@@ -43,6 +67,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // taking the session can deactivate ours; without this the ring switch
         // would mute the game again after every interruption.
         pinAudioSession()
+        pushThermalState() // refresh the governor's heat signal on resume
     }
 
     func applicationWillTerminate(_ application: UIApplication) {

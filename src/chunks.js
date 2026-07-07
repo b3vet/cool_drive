@@ -54,9 +54,11 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
   // single species can fill nearly all of it — so the old rock/bush 0.7-scaling
   // was unsafe. Derive the slot count from config so it can't silently drift again.
   const maxVis = Math.max(CHUNK.visualRing.low, CHUNK.visualRing.medium, CHUNK.visualRing.high);
-  const S = Math.max(CHUNK.poolSlots, (2 * (maxVis + 1) + 1) ** 2); // = 121 at visualRing 4
+  const S = Math.max(CHUNK.poolSlots, (2 * (maxVis + 1) + 1) ** 2); // = 81 at visualRing 3
   const pools = {
-    trunk: makePool(shared.trunkGeo, shared.trunkMat, CHUNK.perChunkCaps.trees, S, true),
+    // trunks don't cast: they sit UNDER the canopy's shadow, so their own shadow is invisible —
+    // skipping them ~halves the tree shadow-caster count.
+    trunk: makePool(shared.trunkGeo, shared.trunkMat, CHUNK.perChunkCaps.trees, S, false),
     canopy: makePool(shared.canopyGeo, shared.canopyMat, CHUNK.perChunkCaps.trees, S, true),
     rock: makePool(shared.rockGeo, shared.rockMat, CHUNK.perChunkCaps.rocks, S, true),
     bush: makePool(shared.bushGeo, shared.bushMat, CHUNK.perChunkCaps.bushes, S, false),
@@ -225,7 +227,7 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
   const _bsC = new THREE.Vector3(CS / 2, 16, CS / 2);
   function poolMeshInit(m, rec) {
     m.count = 0; m.visible = true;
-    m.boundingSphere = new THREE.Sphere(_bsC.clone(), CS * 1.05); // local-space cull sphere covering the chunk
+    m.boundingSphere = new THREE.Sphere(_bsC.clone(), CS * 0.75); // local-space cull sphere: chunk half-diagonal (~0.71) + margin, was an inflated 1.05
     rec.checkedOut.push(m);
   }
   function fillInstances(grp, items, ox, oz, rec, poolName, yFn, solidFn, col) {
@@ -423,7 +425,8 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
     if (rec.group) {
       for (const m of rec.checkedOut) { const pool = poolFor(m); if (pool) checkin(pool, m); }
       for (const g of rec.disposables) g.dispose();
-      if (rec.group.parent) { rec.group.parent.remove(rec.group); shadowDirty = true; }
+      // no shadowDirty: chunks unload ≥1280 m away, far outside the ≤150 m shadow frustum
+      if (rec.group.parent) rec.group.parent.remove(rec.group);
     }
   }
   function poolFor(m) {
@@ -498,7 +501,8 @@ export function createStreamer({ scene, shared, home, quality = 'medium', onReba
         buildProc(rec);
         scene.add(rec.group);
         rec.state = 'LIVE';
-        shadowDirty = true; // new casters entered the scene — refresh shadows this frame
+        // no shadowDirty here: queued chunks activate ≥768 m out, outside the shadow frustum;
+        // the scheduled cadence covers any caster that later enters the followed frustum.
         // a freshly-built chunk in the sim ring must join the active set immediately
         if (Math.abs(rec.cx - acx) <= CHUNK.simRing && Math.abs(rec.cz - acz) <= CHUNK.simRing) gather();
       }

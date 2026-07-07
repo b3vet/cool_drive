@@ -88,11 +88,30 @@ function buildEdge(seed, sx, sz, dir) {
     const m2 = { x: A.x + dx * 0.58 + px * o * s * 1.1, z: A.z + dz * 0.58 + pz * o * s * 1.1 };
     ctrl = [A, m1, m2, B];
   }
-  return { a: A, b: B, samples: catmull(ctrl), width: ROAD_W, id: `${sx},${sz},${dir}` };
+  const samples = catmull(ctrl);
+  // axis-aligned bounds of the edge, for the distToEdges early-out
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const p of samples) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.z < minZ) minZ = p.z; if (p.z > maxZ) maxZ = p.z; }
+  return { a: A, b: B, samples, width: ROAD_W, id: `${sx},${sz},${dir}`, bb: { minX, maxX, minZ, maxZ } };
 }
 
-// all edges OWNED by nodes whose owning-chunk == (cx,cz) — each edge built once
+// Memoized: ownedEdges is a pure function of (seed, cell), and the 5x5 edgesNear window means
+// neighbouring chunk builds re-derive the SAME cells ~26x. An LRU cache turns that into one
+// build per cell. The returned array (and its edges' samples/bb) is treated as IMMUTABLE by all
+// callers — edgesNear/clipEdges/describeChunk only read it or build fresh arrays — so sharing a
+// reference is safe and cannot affect determinism.
+const _oeCache = new Map();
+const _OE_MAX = 512; // covers the ~13x13 edgesNear reach of the resident window, with margin
 export function ownedEdges(seed, cx, cz) {
+  const key = seed + ':' + cx + ',' + cz;
+  const hit = _oeCache.get(key);
+  if (hit) { _oeCache.delete(key); _oeCache.set(key, hit); return hit; } // bump to MRU
+  const out = computeOwnedEdges(seed, cx, cz);
+  _oeCache.set(key, out);
+  if (_oeCache.size > _OE_MAX) _oeCache.delete(_oeCache.keys().next().value); // evict LRU
+  return out;
+}
+function computeOwnedEdges(seed, cx, cz) {
   const out = [];
   // a chunk (256m) holds at most ~1 node (nodes 512m apart); scan the small window
   const sx0 = Math.floor((cx * CS) / NODE) - 1, sz0 = Math.floor((cz * CS) / NODE) - 1;
@@ -124,6 +143,14 @@ function edgesNear(seed, cx, cz) {
 function distToEdges(x, z, edges) {
   let best = Infinity;
   for (const e of edges) {
+    // AABB early-out: if even the nearest point of the edge's bounding box is farther than the
+    // best-so-far, its ~130 samples can't beat it — skip them (most near-edges are far away).
+    const bb = e.bb;
+    if (bb) {
+      const ddx = x < bb.minX ? bb.minX - x : x > bb.maxX ? x - bb.maxX : 0;
+      const ddz = z < bb.minZ ? bb.minZ - z : z > bb.maxZ ? z - bb.maxZ : 0;
+      if (ddx * ddx + ddz * ddz >= best) continue;
+    }
     const s = e.samples;
     for (let i = 0; i < s.length; i++) {
       const d = (s[i].x - x) ** 2 + (s[i].z - z) ** 2;

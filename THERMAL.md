@@ -1,5 +1,10 @@
 # Thermal / performance issue — to address later
 
+> **Update:** the full audit ran and the plan now lives in
+> **[OPTIMIZATION.md](OPTIMIZATION.md)** — including verified verdicts on every
+> suspect below (some confirmed, some redirected, some exonerated). This file is
+> kept as the original repro/context record.
+
 **Deferred.** Captured during playtest so we don't lose the context. This is the big
 optimization pass promised in ROADMAP.md's validation debt.
 
