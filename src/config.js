@@ -70,17 +70,19 @@ export const PHYS = {
 // is 17 taps > PCFSoft's 16). The big thermal wins are elsewhere (Lambert, pixelRatio, fog cull),
 // so soft shadows everywhere are worth the receiver taps.
 export const QUALITY = {
-  // shadowHz kept high enough that the (real, shaped) car shadow tracks the moving car without
-  // visible lag; High is still cut from the old 60. Cheaper depth pass comes from the smaller
-  // per-tier map + tighter shadowRadius + fewer casters (trunks don't cast), not the filter.
+  // shadowHz == fps so the shadow map refreshes EVERY rendered frame: the car casts a real shadow
+  // and is the only per-frame-moving caster, so any cadence below fps makes its shadow jitter a
+  // frame behind the car. The depth pass is cheap (Lambert casters, small per-tier map, tighter
+  // frustum, trunks don't cast), so every-frame shadows are affordable — and the adaptive governor
+  // SLOWS this cadence first when the device heats up (GOV_SHADOW in main.js), so heat stays bounded.
   // Medium is the default (incl. mobile). It renders at High's sharpness — same 1.7 pixelRatio cap
   // on phones and a shadow texel density (2*110/1536 ≈ 0.14 m) matching High's — but keeps the cheap
   // Lambert shading. On this matte low-poly art (roughness ~1, metalness 0) Lambert is visually
   // ~identical to High's full PBR, so Medium looks like High while running far cooler. High exists
   // for anyone who wants true PBR (and a bigger 2048 shadow); Low is the cool-and-quiet floor.
-  high: { label: 'High (full PBR)', pixelRatio: 2, shadow: 2048, fps: 60, shadowHz: 40, shadowFilter: 'soft', shadowRadius: 150 },
-  medium: { label: 'Medium (recommended)', pixelRatio: 1.7, shadow: 1536, fps: 60, shadowHz: 30, shadowFilter: 'soft', shadowRadius: 110 },
-  low: { label: 'Low (cool & quiet)', pixelRatio: 1, shadow: 512, fps: 45, shadowHz: 15, shadowFilter: 'soft', shadowRadius: 85 },
+  high: { label: 'High (full PBR)', pixelRatio: 2, shadow: 2048, fps: 60, shadowHz: 60, shadowFilter: 'soft', shadowRadius: 150 },
+  medium: { label: 'Medium (recommended)', pixelRatio: 1.7, shadow: 1536, fps: 60, shadowHz: 60, shadowFilter: 'soft', shadowRadius: 110 },
+  low: { label: 'Low (cool & quiet)', pixelRatio: 1, shadow: 512, fps: 45, shadowHz: 45, shadowFilter: 'soft', shadowRadius: 85 },
 };
 export const DEFAULT_QUALITY = 'medium';
 

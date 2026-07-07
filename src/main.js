@@ -717,7 +717,9 @@ function frame(now) {
   // Idle menus refresh 4x less often.
   const nowMs = now || lastFrameTime;
   const shadowMul = running ? 1 : 4;
-  if (world.consumeShadowDirty() || sunMoved || nowMs - lastShadowMs >= shadowIntervalMs * shadowMul) {
+  // the -3 ms tolerance lets shadowHz == fps land on EVERY rendered frame (the fps cap leaves ~1.5 ms
+  // of frame-spacing slack, which would otherwise make an exact-interval compare skip every other frame)
+  if (world.consumeShadowDirty() || sunMoved || nowMs - lastShadowMs >= shadowIntervalMs * shadowMul - 3) {
     renderer.shadowMap.needsUpdate = true; lastShadowMs = nowMs; sunMoved = false; shadowPassCount++;
   }
   renderer.render(ctx.scene, ctx.camera);
@@ -751,16 +753,25 @@ world.setRebase((dx, dz) => {
 world.setQuality(qualityKey); // apply the initial streaming radius
 
 // ---- dev perf HUD — draw calls / fps / memory / streaming depth. The instrument
-// for on-device thermal & memory soaks. Toggle with the ` (backtick) key, or start
-// it enabled with ?hud in the URL. Costs nothing while hidden.
+// for on-device thermal & memory soaks. Toggle with the ` (backtick) key on desktop, the
+// "Performance overlay" switch in Settings on mobile, or start enabled with ?hud in the URL.
+// Its enabled state persists. Costs nothing while hidden.
 const dbgHud = document.createElement('div');
 dbgHud.id = 'perfHud';
 dbgHud.style.cssText = 'position:fixed;top:118px;left:16px;z-index:9999;font:11px/1.5 ui-monospace,Menlo,monospace;color:#9ff0d8;background:rgba(8,12,20,.6);padding:8px 11px;border-radius:8px;white-space:pre;pointer-events:none;letter-spacing:.02em';
 document.body.appendChild(dbgHud);
 let hudOn = /[?&]hud\b/.test(location.search);
-dbgHud.style.display = hudOn ? 'block' : 'none';
+try { if (localStorage.getItem('cooldrive.perfhud') === '1') hudOn = true; } catch (e) {}
+function setPerfHud(on) { // single source of truth: display + settings checkbox + persistence stay in sync
+  hudOn = on;
+  dbgHud.style.display = on ? 'block' : 'none';
+  const cb = el('perfToggle'); if (cb) cb.checked = on;
+  try { localStorage.setItem('cooldrive.perfhud', on ? '1' : '0'); } catch (e) {}
+}
+setPerfHud(hudOn);
+{ const cb = el('perfToggle'); if (cb) cb.addEventListener('change', () => setPerfHud(cb.checked)); }
 window.addEventListener('keydown', (e) => {
-  if (e.key === '`' || e.code === 'Backquote') { hudOn = !hudOn; dbgHud.style.display = hudOn ? 'block' : 'none'; }
+  if (e.key === '`' || e.code === 'Backquote') setPerfHud(!hudOn);
 });
 let fpsEMA = 60, hudAcc = 0, shadowSecAcc = 0, shadowRate = 0;
 function updateHud(dtSec) {
