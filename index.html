@@ -261,15 +261,15 @@
   body.mobile.playing .zoneBg, body.mobile.playing .zoneHint { animation: zoneFade 9s ease forwards; }
   @keyframes zoneFade { 0% { opacity: 0 } 6% { opacity: 1 } 72% { opacity: 1 } 100% { opacity: 0 } }
   .zoneBg { top: 0; height: 100%; }
-  .zb-brake { left: 0; width: 50%; height: 100%; background: linear-gradient(90deg, rgba(255,90,77,.20), transparent 78%); border-right: 1px dashed rgba(255,255,255,.12); }
+  /* left side = braking: TOP half regular brake, BOTTOM half handbrake. Right half = gas. */
+  .zb-brake { left: 0; width: 50%; top: 0; height: 50%; background: linear-gradient(135deg, rgba(255,90,77,.22), transparent 80%); border-right: 1px dashed rgba(255,255,255,.12); border-bottom: 1px dashed rgba(255,255,255,.12); }
   .zb-gas { right: 0; width: 50%; height: 100%; background: linear-gradient(270deg, var(--accent-soft), transparent 78%); }
-  /* handbrake is a CENTRE-BOTTOM box (brake/gas run full height either side of it) */
-  .zb-hand { left: 34%; width: 32%; top: auto; bottom: 0; height: 28%; background: linear-gradient(0deg, rgba(74,214,255,.30), transparent 92%); border-top: 1px dashed rgba(255,255,255,.2); border-left: 1px dashed rgba(255,255,255,.14); border-right: 1px dashed rgba(255,255,255,.14); }
+  .zb-hand { left: 0; width: 50%; top: 50%; height: 50%; background: linear-gradient(45deg, rgba(74,214,255,.26), transparent 80%); border-right: 1px dashed rgba(255,255,255,.12); }
   .zoneHint { font-family: var(--disp); font-weight: 700; letter-spacing: .12em; font-size: 15px; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,.6); white-space: nowrap; text-align: center; line-height: 1.3; }
   .zh-steer { top: 10%; left: 50%; transform: translateX(-50%); color: var(--accent); text-shadow: 0 0 14px var(--accent); }
-  .zh-brake { left: 9%; top: 42%; transform: translateY(-50%); color: #ff8a80; }
-  .zh-gas { right: 9%; top: 42%; transform: translateY(-50%); color: #7cf0c8; }
-  .zh-hand { left: 50%; bottom: 4%; transform: translateX(-50%); color: #8fd9ff; }
+  .zh-brake { left: 13%; top: 25%; transform: translateY(-50%); color: #ff8a80; }
+  .zh-gas { right: 9%; top: 50%; transform: translateY(-50%); color: #7cf0c8; }
+  .zh-hand { left: 11%; bottom: 22%; color: #8fd9ff; }
 
   #gearBtn { position: fixed; top: 16px; right: 16px; z-index: 8; width: 44px; height: 44px; clip-path: var(--facet-sm); box-shadow: inset 0 0 0 1px var(--line); background: var(--panel-chip); color: var(--fg); font-size: 20px; cursor: pointer; display: grid; place-items: center; pointer-events: auto; }
   #gearBtn:hover { background: rgba(255,255,255,.12); }
@@ -280,8 +280,8 @@
   /* mobile: the landscape screen is short — shrink the big HUD numbers (esp. the combo) */
   body.mobile #comboVal { font-size: 28px; }
   body.mobile #banked { font-size: 14px; }
-  body.mobile #combo { top: 70%; bottom: auto; }
-  body.mobile #driftFloat { bottom: 38%; font-size: 11px; }
+  body.mobile #combo { top: 59%; bottom: auto; } /* higher on mobile so the score clears the bottom-centre BOOST button */
+  body.mobile #driftFloat { bottom: 46%; font-size: 11px; }
   body.mobile #score { font-size: 28px; }
   body.mobile #best { font-size: 10px; }
   body.mobile #speed { font-size: 34px; }
@@ -289,9 +289,9 @@
   body.mobile #celebrate .sub { font-size: 13px; }
 
   #btnBoostM { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 8; display: none; align-items: center; gap: 6px; padding: 10px 20px; clip-path: var(--facet-sm); background: rgba(255,178,58,.2); box-shadow: inset 0 0 0 1px rgba(255,178,58,.55); color: #fff; font-family: var(--disp); font-weight: 700; font-size: 13px; letter-spacing: .08em; pointer-events: auto; touch-action: none; }
-  body.mobile #btnBoostM { display: inline-flex; left: 14px; right: auto; top: auto; bottom: 14px; transform: none; }
+  body.mobile #btnBoostM { display: inline-flex; left: 50%; right: auto; top: auto; bottom: 10px; transform: translateX(-50%); padding: 12px 34px; font-size: 14px; }
   #btnBoostM.active { filter: brightness(1.4); transform: translateX(-50%) scale(.94); }
-  body.mobile #btnBoostM.active { transform: scale(.94); }
+  body.mobile #btnBoostM.active { transform: translateX(-50%) scale(.94); }
   #btnBoostM span { font-size: 11px; opacity: .85; }
 
   /* (removed the portrait "rotate your device" wall — portrait now renders the
@@ -308,9 +308,11 @@
   body.mobile .ctrlGuide { display: block; }
   .cg-screen { position: relative; width: 240px; height: 122px; clip-path: var(--facet); box-shadow: inset 0 0 0 1.5px var(--line); overflow: hidden; font-family: var(--disp); font-weight: 700; font-size: 13px; letter-spacing: .08em; }
   .cg-half { position: absolute; top: 0; height: 100%; width: 50%; display: grid; place-items: center; align-content: start; padding-top: 26%; }
-  .cg-brake { left: 0; background: rgba(255,90,77,.2); color: #ff8a80; border-right: 1px dashed rgba(255,255,255,.2); }
   .cg-gas { right: 0; background: var(--accent-soft); color: #7cf0c8; }
-  .cg-hand { position: absolute; bottom: 0; left: 34%; right: 34%; height: 34%; display: grid; place-items: center; background: rgba(74,214,255,.24); border: 1px dashed rgba(255,255,255,.24); border-bottom: none; color: #8fd9ff; font-size: 11px; }
+  /* left side = brake (top half) + handbrake (bottom half) */
+  .cg-brake { position: absolute; left: 0; top: 0; width: 50%; height: 50%; display: grid; place-items: center; background: rgba(255,90,77,.2); color: #ff8a80; border-right: 1px dashed rgba(255,255,255,.2); border-bottom: 1px dashed rgba(255,255,255,.2); }
+  .cg-hand { position: absolute; left: 0; bottom: 0; width: 50%; height: 50%; display: grid; place-items: center; background: rgba(74,214,255,.2); color: #8fd9ff; border-right: 1px dashed rgba(255,255,255,.2); font-size: 11px; }
+  .cg-boost { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); z-index: 2; background: rgba(255,178,58,.3); color: #ffd08a; font-size: 10px; font-weight: 700; letter-spacing: .06em; padding: 3px 12px; clip-path: var(--facet-sm); }
   .cg-steer { position: absolute; top: 8px; left: 0; right: 0; z-index: 1; text-align: center; color: var(--accent); font-size: 11px; }
   .cg-cap { margin-top: 10px; font-size: 12px; color: var(--muted); }
 
@@ -385,9 +387,9 @@
   <div class="zoneBg zb-gas"></div>
   <div class="zoneBg zb-hand"></div>
   <div class="zoneHint zh-steer">↔ TILT TO STEER ↔</div>
-  <div class="zoneHint zh-brake">◀<br>BRAKE</div>
+  <div class="zoneHint zh-brake">BRAKE</div>
   <div class="zoneHint zh-gas">GAS<br>▶</div>
-  <div class="zoneHint zh-hand">▼ HANDBRAKE ▼</div>
+  <div class="zoneHint zh-hand">HANDBRAKE</div>
 </div>
 <div id="btnBoostM">⚡<span>BOOST</span></div>
 
@@ -448,9 +450,10 @@
     <div class="ctrlGuide mobileOnly">
       <div class="cg-screen">
         <div class="cg-steer">↔ TILT PHONE = STEER ↔</div>
-        <div class="cg-half cg-brake">BRAKE</div>
-        <div class="cg-half cg-gas">GAS</div>
+        <div class="cg-brake">BRAKE</div>
         <div class="cg-hand">HANDBRAKE</div>
+        <div class="cg-half cg-gas">GAS</div>
+        <div class="cg-boost">⚡ BOOST</div>
       </div>
       <div class="cg-cap">Hold each area with your thumbs · tilt the phone to steer</div>
     </div>

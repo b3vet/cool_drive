@@ -107,9 +107,10 @@ export function createInput() {
     return { x: cx, y: cy, W: rvw, H: rvh };
   }
   function zoneOf(gx, gy, W, H) {
-    // handbrake: a CENTRE-BOTTOM box; brake/gas fill their full height otherwise
-    if (gy > H * 0.72 && gx > W * 0.34 && gx < W * 0.66) return 'handbrake';
-    return gx < W * 0.5 ? 'brake' : 'gas'; // left = brake, right = gas (full height)
+    // right half = gas (full height); the whole LEFT half is braking, split top/bottom:
+    // top half = regular brake, bottom half = handbrake. (Boost is its own centre-bottom button.)
+    if (gx >= W * 0.5) return 'gas';
+    return gy < H * 0.5 ? 'brake' : 'handbrake';
   }
   // Recompute every driving control from the FULL set of active touches on each
   // event. Reading window-level `e.touches` (not per-element changedTouches) makes
