@@ -70,7 +70,7 @@ export function createHUD() {
       if (last.banked !== bkTxt) { last.banked = bkTxt; banked.textContent = bkTxt; }
       const hue = Math.round(140 - Math.min(m / 10, 1) * 110); // quantize → skip most --c rewrites
       if (last.hue !== hue) { last.hue = hue; combo.style.setProperty('--c', `hsl(${hue} 90% 55%)`); }
-      const scale = 1 + Math.min(m / 10, 1) * 0.5 + comboPulse;
+      const scale = 1 + Math.min(m / 10, 1) * 0.35 + comboPulse; // trimmed so the group stays compact
       const tf = `translateX(-50%) scale(${scale.toFixed(3)})`; // compositor-only (layer promoted)
       if (last.comboTf !== tf) { last.comboTf = tf; combo.style.transform = tf; }
       comboPulse = Math.max(0, comboPulse - dt * 4);
@@ -78,7 +78,6 @@ export function createHUD() {
     } else {
       combo.classList.remove('show');
       combo.classList.remove('hot');
-      combo.classList.remove('linked');
     }
 
     // banked event
@@ -104,13 +103,12 @@ export function createHUD() {
       st.justFailed = false;
     }
 
-    // link counter (direction transitions within the current chain) — a line below the
-    // banked amount; the combo drops down (.linked) so it never crowds the DRIFT text
+    // link counter (direction transitions within the current chain) — a line below the banked
+    // amount; the combo is top-anchored so this extra line just grows downward, never into DRIFT
     if (linkTag) {
       const linked = st.active && st.links > 0;
       if (linked) { linkTag.classList.add('show'); linkTag.textContent = 'LINK ×' + st.links; }
       else linkTag.classList.remove('show');
-      combo.classList.toggle('linked', linked);
       if (st.justLink > 0) { linkTag.classList.remove('pop'); void linkTag.offsetWidth; linkTag.classList.add('pop'); comboPulse = 0.25; st.justLink = 0; }
     }
     // near-miss shave pop — show the points it banked so "close = gain" is visible

@@ -562,6 +562,7 @@ let ringRunTotal = 0;
 let regionsSeen = 0;
 let procTownCheckAcc = 0;
 let lastFrameTime = 0;
+let dtSmooth = 1 / 60; // low-passed frame delta (see frame()) — kills render/camera judder from rAF jitter
 
 function frame(now) {
   requestAnimationFrame(frame);
@@ -573,8 +574,15 @@ function frame(now) {
   // cadence instead of quantizing up to the panel's vsync; snap to `now` if we fell far behind
   // (e.g. the tab was backgrounded) so we don't burst-render to catch up.
   lastFrameTime = (now && now - lastFrameTime < cap * 2) ? lastFrameTime + cap : (now || 0);
-  let dt = clock.getDelta();
-  if (dt > 0.1) dt = 0.1;
+  let raw = clock.getDelta();
+  if (raw > 0.1) raw = 0.1; // clamp a huge gap (backgrounded tab)
+  // Low-pass the frame delta. Raw rAF spacing jitters (heavy frames, and 120 Hz ProMotion + the fps
+  // cap create an uneven render cadence); that jitter surfaces as render-interpolation + camera judder
+  // — the car appears to briefly stutter or slip backward even at a steady average frame rate. The sim
+  // is fixed-timestep (STEP is constant), so smoothing dt only paces the accumulator + camera evenly;
+  // it is self-correcting, so there's no long-term drift.
+  dtSmooth += (raw - dtSmooth) * 0.4;
+  let dt = dtSmooth;
 
   const cmd = input.sample();
   if (input.consumePressed('r')) resetCar();

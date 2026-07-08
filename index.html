@@ -76,19 +76,19 @@
   #best.flash { animation: bestPop 1.2s ease; color: var(--gold); }
   @keyframes bestPop { 0%,100%{transform:scale(1)} 30%{transform:scale(1.35); color:var(--gold)} }
 
-  #combo { position: fixed; left: 50%; bottom: 13%; transform: translateX(-50%) skewX(-6deg); --c: var(--accent); text-align: center; opacity: 0; transition: opacity .15s ease; transform-origin: center bottom; will-change: transform; }
+  /* TOP-anchored + transform-origin top so the multiplier's TOP edge is pinned: the value scaling up
+     and the extra LINK line both grow DOWNWARD, never up into the DRIFT text above (works on every
+     platform + state, unlike the old bottom-anchored `.linked` shift that mobile specificity broke). */
+  #combo { position: fixed; left: 50%; top: 70%; transform: translateX(-50%) skewX(-6deg); --c: var(--accent); text-align: center; opacity: 0; transition: opacity .15s ease; transform-origin: center top; will-change: transform; }
   #combo.show { opacity: 1; }
   #combo.fail #comboVal { animation: shake .35s; color: var(--hot) !important; text-shadow: 0 0 24px var(--hot); }
   #comboVal { font-family: var(--disp); font-size: clamp(38px, 8vw, 76px); font-weight: 700; color: var(--c); text-shadow: 0 0 26px var(--c), 0 4px 18px rgba(0,0,0,.6); line-height: 1; font-variant-numeric: tabular-nums; }
-  /* when a link chain is live, drop the whole combo down so the extra LINK line has room
-     below without pushing the multiplier up into the DRIFT text above it */
-  #combo.linked { bottom: 6%; }
   /* style-heat glow (near-miss shaves) — signals "you're earning bonus points" */
   #combo.hot #comboVal { color: #ffb14a; text-shadow: 0 0 30px #ff7a1a, 0 0 12px #ffd24a, 0 4px 18px rgba(0,0,0,.6); }
   #banked { font-family: var(--disp); font-size: clamp(15px, 3vw, 24px); font-weight: 600; opacity: .92; margin-top: 3px; letter-spacing: .04em; }
   @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-8px)} 75%{transform:translateX(8px)} }
 
-  #driftFloat { position: fixed; left: 50%; bottom: 26%; transform: translateX(-50%) translateY(8px); font-family: var(--disp); font-weight: 700; letter-spacing: .4em; font-size: 14px; color: var(--accent); opacity: 0; transition: opacity .12s ease, transform .12s ease; text-shadow: 0 0 18px var(--accent); }
+  #driftFloat { position: fixed; left: 50%; bottom: 36%; transform: translateX(-50%) translateY(8px); font-family: var(--disp); font-weight: 700; letter-spacing: .4em; font-size: 14px; color: var(--accent); opacity: 0; transition: opacity .12s ease, transform .12s ease; text-shadow: 0 0 18px var(--accent); }
   #driftFloat.show { opacity: .92; transform: translateX(-50%) translateY(0); }
 
   #bankFlash { position: fixed; top: 82px; left: 30px; font-family: var(--disp); font-size: 21px; font-weight: 700; color: var(--accent); opacity: 0; pointer-events: none; font-variant-numeric: tabular-nums; }
@@ -280,8 +280,8 @@
   /* mobile: the landscape screen is short — shrink the big HUD numbers (esp. the combo) */
   body.mobile #comboVal { font-size: 28px; }
   body.mobile #banked { font-size: 14px; }
-  body.mobile #combo { bottom: 15%; }
-  body.mobile #driftFloat { bottom: 30%; font-size: 11px; }
+  body.mobile #combo { top: 70%; bottom: auto; }
+  body.mobile #driftFloat { bottom: 38%; font-size: 11px; }
   body.mobile #score { font-size: 28px; }
   body.mobile #best { font-size: 10px; }
   body.mobile #speed { font-size: 34px; }
