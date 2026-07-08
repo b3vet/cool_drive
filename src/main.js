@@ -786,13 +786,15 @@ function updateHud(dtSec) {
   hudAcc = 0;
   const inf = renderer.info, st = world.streamer;
   const gov = govLevel > 0 ? '↓' + govLevel : ''; // adaptive-governor step-down marker
+  const tr = input.tiltReadout && input.tiltReadout(); // tilt debug line (only when motion is active)
   dbgHud.textContent =
     `fps   ${fpsEMA.toFixed(0).padStart(3)}    ${(1000 / Math.max(fpsEMA, 1)).toFixed(1)} ms\n` +
     `draws ${String(inf.render.calls).padStart(4)}   tris ${(inf.render.triangles / 1000).toFixed(0)}k\n` +
     `shdw  ${shadowRate.toFixed(0).padStart(4)}/s  q ${qualityKey[0].toUpperCase()}${gov}\n` +
     `geo   ${String(inf.memory.geometries).padStart(4)}   tex  ${String(inf.memory.textures).padStart(3)}\n` +
     `chunk ${String(st.chunkCount).padStart(4)}   queue ${st.queueDepth}\n` +
-    `pos   ${carState.x.toFixed(0)}, ${carState.z.toFixed(0)}   home ${world.homeDist(carState.x, carState.z).toFixed(0)} m`;
+    `pos   ${carState.x.toFixed(0)}, ${carState.z.toFixed(0)}   home ${world.homeDist(carState.x, carState.z).toFixed(0)} m` +
+    (tr ? `\ntilt  raw ${tr.raw.toFixed(0).padStart(4)}  d ${tr.d.toFixed(0).padStart(4)}  steer ${tr.steer.toFixed(2)}` : '');
 }
 
 // Warm up shader compilation up front: the home region, the chunks primed around

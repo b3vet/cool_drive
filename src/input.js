@@ -36,38 +36,52 @@ export function createInput() {
   let rvw = window.innerWidth, rvh = window.innerHeight;
   const setRotated = (on, vw, vh) => { rotated = on; if (vw) rvw = vw; if (vh) rvh = vh; };
 
-  // ---- gyroscope ------------------------------------------------------------
+  // ---- gyroscope (gravity-vector steering) ----------------------------------
+  // Steering reads the GRAVITY direction (devicemotion) and derives a bank angle via atan2 —
+  // NOT a single raw Euler angle. Holding the phone upright in landscape sits at beta≈±90, the
+  // Euler gimbal-lock singularity, where a raw beta/gamma flips sign even when the device is
+  // perfectly still (the old "sudden full-left" glitch). A gravity vector never gimbal-locks, so
+  // atan2 of its screen-plane projection is continuous through the whole banking range.
   let motionActive = false;
   let useTilt = false;
-  let tiltRaw = 0;
+  let tiltRaw = null;    // smoothed bank angle (deg); null until the first reading
   let tiltNeutral = null;
-  let tiltSens = 1.0; // 1 = ~32° tilt for full lock
+  let tiltSens = 1.0;    // 1 = ~32° tilt for full lock
   let tiltInvert = true; // inverted feels right by default
+  const wrap180 = (a) => a - 360 * Math.round(a / 360); // shortest arc into (-180, 180]
 
-  function onOrient(e) {
-    if (e.beta === null && e.gamma === null) return;
-    const angle = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
-    // pick the axis that maps to left/right "wheel" tilt for the current orientation
-    let t;
-    if (rotated) t = e.beta; // portrait viewport but rendering landscape -> phone held sideways
-    else if (angle === 90) t = e.beta;
-    else if (angle === 270 || angle === -90) t = -e.beta;
-    else if (angle === 180) t = -e.gamma;
-    else t = e.gamma; // 0 / portrait
-    tiltRaw = t;
-    if (tiltNeutral === null) tiltNeutral = t; // calibrate to however it's first held
+  function onMotion(e) {
+    const g = e.accelerationIncludingGravity;
+    if (!g || g.x == null || g.y == null) return;
+    // rotate device-frame gravity into SCREEN space so landscape-left/right (and the CSS-rotated
+    // portrait path) all steer the same way, then take a gimbal-lock-free roll from its projection.
+    let deg = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+    if (rotated) deg += 90; // the game is CSS-rotated another 90° over the device orientation
+    const a = deg * (Math.PI / 180), ca = Math.cos(a), sa = Math.sin(a);
+    const sx = g.x * ca + g.y * sa, sy = -g.x * sa + g.y * ca;
+    const roll = Math.atan2(sx, -sy) * (180 / Math.PI); // 0 ≈ upright; sign = bank direction
+    if (tiltRaw === null) { tiltRaw = roll; if (tiltNeutral === null) tiltNeutral = roll; return; }
+    let dd = wrap180(roll - tiltRaw);
+    if (Math.abs(dd) > 40) return; // a >40°/sample jump is a sensor spike, not a real tilt — drop it
+    tiltRaw = wrap180(tiltRaw + dd * 0.35); // low-pass: isolates gravity from hand-motion noise
+    if (tiltNeutral === null) tiltNeutral = tiltRaw;
   }
 
   async function enableMotion() {
     try {
-      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-        const res = await DeviceOrientationEvent.requestPermission(); // iOS 13+ gesture-gated
+      // iOS 13+ gesture-gated permission (one "Motion & Orientation" grant). We read devicemotion.
+      const DME = typeof DeviceMotionEvent !== 'undefined' ? DeviceMotionEvent : null;
+      if (DME && typeof DME.requestPermission === 'function') {
+        const res = await DME.requestPermission();
+        if (res !== 'granted') return false;
+      } else if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        const res = await DeviceOrientationEvent.requestPermission(); // fallback grant path
         if (res !== 'granted') return false;
       }
-      window.addEventListener('deviceorientation', onOrient);
+      window.addEventListener('devicemotion', onMotion);
       motionActive = true;
       useTilt = true;
-      tiltNeutral = null;
+      tiltNeutral = null; tiltRaw = null;
       return true;
     } catch (e) {
       return false;
@@ -79,8 +93,8 @@ export function createInput() {
   const isMotionActive = () => motionActive;
   // raw screen-roll (radians) for the camera to counter so the view stays level
   const deviceRoll = () => {
-    if (!motionActive || tiltNeutral === null) return 0;
-    let d = tiltRaw - tiltNeutral;
+    if (!motionActive || tiltNeutral === null || tiltRaw === null) return 0;
+    let d = wrap180(tiltRaw - tiltNeutral);
     if (tiltInvert) d = -d; // same inversion as steering, so the view rolls the correct way
     return clamp(d, -55, 55) * (Math.PI / 180);
   };
@@ -181,8 +195,8 @@ export function createInput() {
 
     // steering: tilt takes over on mobile when motion is active; else keyboard
     let steer = (kLeft ? 1 : 0) - (kRight ? 1 : 0);
-    if (useTilt && motionActive && tiltNeutral !== null) {
-      let d = tiltRaw - tiltNeutral;
+    if (useTilt && motionActive && tiltNeutral !== null && tiltRaw !== null) {
+      let d = wrap180(tiltRaw - tiltNeutral);
       if (tiltInvert) d = -d;
       // progressive analog mapping (like a real wheel): proportional to tilt angle,
       // with a soft deadzone so center is calm but there's no on/off jump.
@@ -201,10 +215,18 @@ export function createInput() {
   }
   function clearPressed() { pressed.clear(); }
 
+  // live tilt values for the perf overlay — lets you confirm on-device that the bank angle
+  // moves continuously through the whole range (no sudden opposite flips) and steers correctly.
+  function tiltReadout() {
+    if (!motionActive || tiltNeutral === null || tiltRaw === null) return null;
+    let d = wrap180(tiltRaw - tiltNeutral); if (tiltInvert) d = -d;
+    return { raw: tiltRaw, d, steer: input.steer };
+  }
+
   return {
     sample, consumePressed, clearPressed,
     bindZones, bindHold, setRotated,
-    enableMotion, recenterTilt, setTiltSensitivity, setTiltInvert, isMotionActive, deviceRoll,
+    enableMotion, recenterTilt, setTiltSensitivity, setTiltInvert, isMotionActive, deviceRoll, tiltReadout,
     _keys: keys,
   };
 }
