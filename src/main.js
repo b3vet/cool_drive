@@ -135,6 +135,7 @@ function buildSelectedCar() {
   cam = createChaseCam(ctx.camera, car);
   cam.setMode(prevMode);
   cam.reset();
+  audio.setEngineVoice(CARS[selectedCarIndex].id); // each car gets a distinct engine sound
 }
 buildSelectedCar();
 

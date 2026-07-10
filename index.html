@@ -76,19 +76,19 @@
   #best.flash { animation: bestPop 1.2s ease; color: var(--gold); }
   @keyframes bestPop { 0%,100%{transform:scale(1)} 30%{transform:scale(1.35); color:var(--gold)} }
 
-  /* TOP-anchored + transform-origin top so the multiplier's TOP edge is pinned: the value scaling up
-     and the extra LINK line both grow DOWNWARD, never up into the DRIFT text above (works on every
-     platform + state, unlike the old bottom-anchored `.linked` shift that mobile specificity broke). */
-  #combo { position: fixed; left: 50%; top: 70%; transform: translateX(-50%) skewX(-6deg); --c: var(--accent); text-align: center; opacity: 0; transition: opacity .15s ease; transform-origin: center top; will-change: transform; }
+  /* The drift read-out (DRIFT + multiplier + banked + LINK) lives at the TOP-centre so it never
+     covers the car / the action in the middle of the screen. TOP-anchored + transform-origin top so
+     the value scaling up and the extra LINK line grow DOWNWARD (never up into the DRIFT label). */
+  #combo { position: fixed; left: 50%; top: 88px; transform: translateX(-50%) skewX(-6deg); --c: var(--accent); text-align: center; opacity: 0; transition: opacity .15s ease; transform-origin: center top; will-change: transform; }
   #combo.show { opacity: 1; }
   #combo.fail #comboVal { animation: shake .35s; color: var(--hot) !important; text-shadow: 0 0 24px var(--hot); }
-  #comboVal { font-family: var(--disp); font-size: clamp(38px, 8vw, 76px); font-weight: 700; color: var(--c); text-shadow: 0 0 26px var(--c), 0 4px 18px rgba(0,0,0,.6); line-height: 1; font-variant-numeric: tabular-nums; }
+  #comboVal { font-family: var(--disp); font-size: clamp(28px, 4.6vw, 48px); font-weight: 700; color: var(--c); text-shadow: 0 0 26px var(--c), 0 4px 18px rgba(0,0,0,.6); line-height: 1; font-variant-numeric: tabular-nums; }
   /* style-heat glow (near-miss shaves) — signals "you're earning bonus points" */
   #combo.hot #comboVal { color: #ffb14a; text-shadow: 0 0 30px #ff7a1a, 0 0 12px #ffd24a, 0 4px 18px rgba(0,0,0,.6); }
-  #banked { font-family: var(--disp); font-size: clamp(15px, 3vw, 24px); font-weight: 600; opacity: .92; margin-top: 3px; letter-spacing: .04em; }
+  #banked { font-family: var(--disp); font-size: clamp(13px, 2.2vw, 18px); font-weight: 600; opacity: .92; margin-top: 2px; letter-spacing: .04em; }
   @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-8px)} 75%{transform:translateX(8px)} }
 
-  #driftFloat { position: fixed; left: 50%; bottom: 36%; transform: translateX(-50%) translateY(8px); font-family: var(--disp); font-weight: 700; letter-spacing: .4em; font-size: 14px; color: var(--accent); opacity: 0; transition: opacity .12s ease, transform .12s ease; text-shadow: 0 0 18px var(--accent); }
+  #driftFloat { position: fixed; left: 50%; top: 66px; transform: translateX(-50%) translateY(-6px); font-family: var(--disp); font-weight: 700; letter-spacing: .4em; font-size: 12px; color: var(--accent); opacity: 0; transition: opacity .12s ease, transform .12s ease; text-shadow: 0 0 18px var(--accent); }
   #driftFloat.show { opacity: .92; transform: translateX(-50%) translateY(0); }
 
   #bankFlash { position: fixed; top: 82px; left: 30px; font-family: var(--disp); font-size: 21px; font-weight: 700; color: var(--accent); opacity: 0; pointer-events: none; font-variant-numeric: tabular-nums; }
@@ -129,8 +129,8 @@
   #awardFlash { position: fixed; left: 50%; top: 30%; transform: translate(-50%,-50%) skewX(-6deg); font-family: var(--disp); font-weight: 700; font-size: clamp(24px,5vw,46px); color: var(--gold); text-shadow: 0 0 30px rgba(255,210,74,.6); opacity: 0; pointer-events: none; z-index: 7; font-variant-numeric: tabular-nums; }
   #awardFlash.play { animation: celebrate 1.4s cubic-bezier(.2,.8,.2,1) forwards; }
 
-  /* a line BELOW the banked amount; the combo shifts down (see #combo.linked) so it fits */
-  #linkTag { font-family: var(--disp); font-size: clamp(13px,2.6vw,20px); font-weight: 700; letter-spacing: .06em; color: var(--gold); text-shadow: 0 0 16px rgba(255,210,74,.5); margin-top: 3px; opacity: 0; transition: opacity .12s ease; }
+  /* a line BELOW the banked amount; the top-anchored combo grows downward to make room */
+  #linkTag { font-family: var(--disp); font-size: clamp(12px,2vw,16px); font-weight: 700; letter-spacing: .06em; color: var(--gold); text-shadow: 0 0 16px rgba(255,210,74,.5); margin-top: 2px; opacity: 0; transition: opacity .12s ease; }
   #linkTag.show { opacity: .95; }
   #linkTag.pop { animation: shake .35s; }
 
@@ -278,10 +278,12 @@
   #camBtn:hover { background: rgba(255,255,255,.12); }
 
   /* mobile: the landscape screen is short — shrink the big HUD numbers (esp. the combo) */
-  body.mobile #comboVal { font-size: 28px; }
-  body.mobile #banked { font-size: 14px; }
-  body.mobile #combo { top: 59%; bottom: auto; } /* higher on mobile so the score clears the bottom-centre BOOST button */
-  body.mobile #driftFloat { bottom: 46%; font-size: 11px; }
+  /* mobile: the drift read-out tucks up under the top-centre radio bar, and is smaller, so it stays
+     well clear of the car and the action in the middle of the screen */
+  body.mobile #comboVal { font-size: 20px; }
+  body.mobile #banked { font-size: 11px; }
+  body.mobile #combo { top: 78px; bottom: auto; }
+  body.mobile #driftFloat { top: 60px; bottom: auto; font-size: 10px; }
   body.mobile #score { font-size: 28px; }
   body.mobile #best { font-size: 10px; }
   body.mobile #speed { font-size: 34px; }
@@ -302,6 +304,11 @@
   .nativeOnly { display: none; }
   body.native .nativeOnly { display: block; }
   body.mobile #hint { display: none; }
+
+  /* start-screen handbrake tip */
+  .startTip { margin-top: 16px; padding: 12px 15px; clip-path: var(--facet-sm); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-dim); font-size: 13.5px; line-height: 1.5; color: var(--fg); }
+  .startTip b { color: var(--accent); font-family: var(--disp); letter-spacing: .04em; }
+  body.mobile .startTip { font-size: 12px; margin-top: 12px; padding: 10px 12px; }
 
   /* start-screen control guide (mobile) */
   .ctrlGuide { display: none; margin-top: 16px; }
@@ -446,6 +453,7 @@
     <div class="cars" id="carRow"></div>
 
     <button id="btnStart">DRIVE</button>
+    <div class="startTip">💡 <b>TIP</b> — hold the <b>handbrake</b> through a corner to keep the slide going. The longer you drift, the bigger your combo.</div>
     <div class="startfoot"><b id="achProgress">0/0</b> achievements · sound starts on drive</div>
     <div class="ctrlGuide mobileOnly">
       <div class="cg-screen">

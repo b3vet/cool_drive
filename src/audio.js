@@ -34,6 +34,18 @@ export function createAudio() {
   let eng = null;
   let skid = null;
 
+  // Per-car engine "voice" (timbre). Set on car select; updateEngine reads it every frame so the
+  // three cars sound clearly different. Keyed by CARS[].id.
+  const ENGINE_VOICES = {
+    // Falcon GT — balanced all-rounder: mid, punchy
+    falcon: { o1: 'sawtooth', o2: 'square', o2Mul: 1.5, o2Detune: -12, subMul: 0.5, subGain: 1.0, freqBase: 46, freqRange: 150, lpBase: 500, lpRange: 1400, lpQ: 0.8, gain: 1.0 },
+    // Night Viper — low/fast/slippery: high-revving raspy tuner whine (higher pitch, brighter, less rumble)
+    viper: { o1: 'sawtooth', o2: 'sawtooth', o2Mul: 2.0, o2Detune: 9, subMul: 0.5, subGain: 0.55, freqBase: 60, freqRange: 205, lpBase: 850, lpRange: 2300, lpQ: 1.5, gain: 0.92 },
+    // Brute V8 — heavy muscle: deep, lumpy, rumbling V8 burble (lower pitch, darker, fat sub)
+    brute: { o1: 'sawtooth', o2: 'square', o2Mul: 1.0, o2Detune: -24, subMul: 0.5, subGain: 1.7, freqBase: 33, freqRange: 108, lpBase: 300, lpRange: 820, lpQ: 0.6, gain: 1.12 },
+  };
+  let voice = ENGINE_VOICES.falcon;
+
   // radio
   let stationIndex = 0;
   let radioOn = false;
@@ -104,15 +116,17 @@ export function createAudio() {
 
   // ---- persistent engine + skid -------------------------------------------
   function buildContinuous() {
-    // engine: detuned saw + sub through a lowpass
-    const o1 = ctx.createOscillator(); o1.type = 'sawtooth';
-    const o2 = ctx.createOscillator(); o2.type = 'square'; o2.detune.value = -12;
+    // engine: detuned saw + square + sub through a lowpass. Timbre comes from the active `voice`,
+    // with the sub on its own gain so each car's rumble level differs.
+    const o1 = ctx.createOscillator(); o1.type = voice.o1;
+    const o2 = ctx.createOscillator(); o2.type = voice.o2; o2.detune.value = voice.o2Detune;
     const sub = ctx.createOscillator(); sub.type = 'sine';
-    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700; lp.Q.value = 0.7;
+    const subG = ctx.createGain(); subG.gain.value = voice.subGain;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700; lp.Q.value = voice.lpQ;
     const g = ctx.createGain(); g.gain.value = 0.0;
-    o1.connect(lp); o2.connect(lp); sub.connect(g); lp.connect(g); g.connect(sfxBus);
+    o1.connect(lp); o2.connect(lp); sub.connect(subG); subG.connect(g); lp.connect(g); g.connect(sfxBus);
     o1.start(); o2.start(); sub.start();
-    eng = { o1, o2, sub, lp, g };
+    eng = { o1, o2, sub, subG, lp, g };
 
     // skid: looping noise through a bandpass
     const src = ctx.createBufferSource(); src.buffer = noiseBuffer(2); src.loop = true;
@@ -127,13 +141,27 @@ export function createAudio() {
     if (!eng) return;
     const t = ctx.currentTime;
     const frac = Math.min(Math.abs(speed) / maxSpeed, 1.2);
-    const freq = 46 + frac * 150;
+    const freq = voice.freqBase + frac * voice.freqRange;
     eng.o1.frequency.setTargetAtTime(freq, t, 0.05);
-    eng.o2.frequency.setTargetAtTime(freq * 1.5, t, 0.05);
-    eng.sub.frequency.setTargetAtTime(freq * 0.5, t, 0.05);
-    eng.lp.frequency.setTargetAtTime(500 + frac * 1400, t, 0.08);
-    const target = 0.05 + (throttle ? 0.1 : 0.0) + frac * 0.12;
+    eng.o2.frequency.setTargetAtTime(freq * voice.o2Mul, t, 0.05);
+    eng.sub.frequency.setTargetAtTime(freq * voice.subMul, t, 0.05);
+    eng.lp.frequency.setTargetAtTime(voice.lpBase + frac * voice.lpRange, t, 0.08);
+    const target = (0.05 + (throttle ? 0.1 : 0.0) + frac * 0.12) * voice.gain;
     eng.g.gain.setTargetAtTime(target, t, 0.1);
+  }
+
+  // switch the engine timbre to a car (by CARS[].id). Stores the voice for the next buildContinuous,
+  // and retunes the live nodes if the engine is already running (mid-game car swap).
+  function setEngineVoice(id) {
+    voice = ENGINE_VOICES[id] || ENGINE_VOICES.falcon;
+    if (eng && ctx) {
+      const t = ctx.currentTime;
+      eng.o1.type = voice.o1;
+      eng.o2.type = voice.o2;
+      eng.o2.detune.setValueAtTime(voice.o2Detune, t);
+      eng.lp.Q.setValueAtTime(voice.lpQ, t);
+      eng.subG.gain.setTargetAtTime(voice.subGain, t, 0.05);
+    }
   }
 
   function updateSkid(intensity) {
@@ -385,7 +413,7 @@ export function createAudio() {
   function toggleMute() { setMuted(!muted); return muted; }
 
   return {
-    start, isRunning, sfx, updateEngine, updateSkid,
+    start, isRunning, sfx, updateEngine, updateSkid, setEngineVoice,
     radioToggle, nextStation, station, isRadioOn,
     setMuted, toggleMute, setMusicVol, setSfxVol,
     setOnRadioError(fn) { onRadioError = fn; },
